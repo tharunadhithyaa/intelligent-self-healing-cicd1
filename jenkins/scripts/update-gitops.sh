@@ -43,21 +43,12 @@ if [ -z "${BUILD_NUMBER}" ] || ! [[ "${BUILD_NUMBER}" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-log_info "Initiating Stage 11 Argo CD deployment update for build '${BUILD_NUMBER}'"
-log_info "Configured deployment rollout timeout: ${DEPLOYMENT_TIMEOUT}s"
-
-# Ensure we are in the repository root
 cd "${REPO_ROOT}"
 
 EXPECTED_BACKEND="ghcr.io/tharunadhithyaa/civicpulse-backend:${BUILD_NUMBER}"
 EXPECTED_FRONTEND="ghcr.io/tharunadhithyaa/civicpulse-frontend:${BUILD_NUMBER}"
 EXPECTED_MONGODB="ghcr.io/tharunadhithyaa/civicpulse-mongodb:latest"
 EXPECTED_NGINX="ghcr.io/tharunadhithyaa/civicpulse-nginx:latest"
-
-log_info "Target Backend image : ${EXPECTED_BACKEND}"
-log_info "Target Frontend image: ${EXPECTED_FRONTEND}"
-log_info "Target MongoDB image : ${EXPECTED_MONGODB}"
-log_info "Target Nginx image   : ${EXPECTED_NGINX}"
 
 # ── 1. Pre-Deployment GHCR Image Manifest Availability Check ─────────────────
 log_info "Performing pre-deployment GHCR image manifest availability check..."
@@ -85,7 +76,7 @@ if command -v docker &>/dev/null; then
     log_ok "Pre-deployment check: Frontend image '${EXPECTED_FRONTEND}' verified in GHCR"
 fi
 
-# ── 2. Update Argo CD Application Parameter Overrides (Zero Commit) ───────────
+# ── 2. Validate K3s Cluster & Argo CD Application Prerequisites ──────────────
 if [ -z "${KUBECONFIG:-}" ]; then
     if [ -f "${HOME}/.kube/config" ] && [ -r "${HOME}/.kube/config" ]; then
         export KUBECONFIG="${HOME}/.kube/config"
@@ -116,6 +107,22 @@ if ! kubectl get application civicpulse -n argocd --request-timeout=10s >/dev/nu
     exit 1
 fi
 log_ok "Argo CD Application 'civicpulse' found in namespace 'argocd'"
+
+# ── Retrieve Previous Tags & Display Stage Header ─────────────────────────────
+PREV_BACKEND_TAG=$(kubectl get deployment civicpulse-backend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null | awk -F':' '{print $NF}' || echo "unknown")
+PREV_FRONTEND_TAG=$(kubectl get deployment civicpulse-frontend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null | awk -F':' '{print $NF}' || echo "unknown")
+
+echo ""
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  STAGE 11 — ARGO CD DEPLOYMENT                           ${NC}"
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+echo "  Build Number       : ${BUILD_NUMBER}"
+echo "  Target Backend     : ${EXPECTED_BACKEND}"
+echo "  Target Frontend    : ${EXPECTED_FRONTEND}"
+echo "  Previous Backend   : ${PREV_BACKEND_TAG}"
+echo "  Previous Frontend  : ${PREV_FRONTEND_TAG}"
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+echo ""
 
 # ── Ensure Namespace and Secrets Exist ────────────────────────────────────────
 kubectl create namespace civicpulse --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1 || true
@@ -164,7 +171,6 @@ if ! kubectl patch application civicpulse -n argocd --type merge --request-timeo
     log_error "Failed to patch Argo CD Application parameter overrides for build '${BUILD_NUMBER}'"
     exit 1
 fi
-
 log_ok "Argo CD Application parameter overrides patch submitted"
 
 # ── Verify Live Application Spec Parameters Immediately After Patch ───────────
@@ -178,11 +184,11 @@ if [ "${FRONTEND_SPEC_TAG}" != "${BUILD_NUMBER}" ] || [ "${BACKEND_SPEC_TAG}" !=
 fi
 log_ok "Verified Argo CD Application live spec parameters: frontend=${FRONTEND_SPEC_TAG}, backend=${BACKEND_SPEC_TAG}"
 
-# ── 3. Argo CD Application Refresh & Synchronization Wait ─────────────────────
+# ── Trigger Argo CD Refresh ───────────────────────────────────────────────────
 log_info "Triggering Argo CD application refresh via Kubernetes API..."
 kubectl annotate application civicpulse -n argocd argocd.argoproj.io/refresh=normal --overwrite --request-timeout=10s >/dev/null 2>&1 || true
 
-log_info "Waiting for Argo CD to synchronize application manifests..."
+log_info "Waiting for Argo CD to reconcile manifests..."
 SYNC_WAIT=0
 while [ $SYNC_WAIT -lt 60 ]; do
     SYNC_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.sync.status}' --request-timeout=10s 2>/dev/null || echo "Unknown")
@@ -194,18 +200,21 @@ while [ $SYNC_WAIT -lt 60 ]; do
     SYNC_WAIT=$((SYNC_WAIT + 5))
 done
 
-# ── 4. Wait for Kubernetes Deployment Rollouts & Pod Readiness ───────────────
+# ── 4. Wait for Deployment Spec Transition & Workload Rollout ───────────────
 log_info "Waiting for Kubernetes Workload Rollout & Pod Readiness (Timeout: ${DEPLOYMENT_TIMEOUT}s)..."
 
 ELAPSED=0
 ROLLOUT_COMPLETE=false
+BACKEND_LIVE_IMG="unknown"
+FRONTEND_LIVE_IMG="unknown"
 
 while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
-    BACKEND_STATUS=$(kubectl get deployment civicpulse-backend -n civicpulse -o jsonpath='{.status.conditions[?(@.type=="Progressing")].reason}' --request-timeout=10s 2>/dev/null || echo "Unknown")
-    FRONTEND_STATUS=$(kubectl get deployment civicpulse-frontend -n civicpulse -o jsonpath='{.status.conditions[?(@.type=="Progressing")].reason}' --request-timeout=10s 2>/dev/null || echo "Unknown")
+    BACKEND_LIVE_IMG=$(kubectl get deployment civicpulse-backend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "unknown")
+    FRONTEND_LIVE_IMG=$(kubectl get deployment civicpulse-frontend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "unknown")
     HEALTH_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.health.status}' --request-timeout=10s 2>/dev/null || echo "Unknown")
+    SYNC_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.sync.status}' --request-timeout=10s 2>/dev/null || echo "Unknown")
 
-    log_info "[GITOPS] Argo CD: ${HEALTH_STATUS} | Backend: ${BACKEND_STATUS} | Frontend: ${FRONTEND_STATUS} (${ELAPSED}s/${DEPLOYMENT_TIMEOUT}s)"
+    log_info "[GITOPS] Desired: :${BUILD_NUMBER} | Live Backend Spec: ${BACKEND_LIVE_IMG} | Live Frontend Spec: ${FRONTEND_LIVE_IMG} (${ELAPSED}s/${DEPLOYMENT_TIMEOUT}s)"
 
     # Inspect pod status for fast failure detection
     POD_ERRORS=$(kubectl get pods -n civicpulse --no-headers --request-timeout=10s 2>/dev/null | grep -E "ImagePullBackOff|ErrImagePull|CrashLoopBackOff" || true)
@@ -222,7 +231,16 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
         break
     fi
 
-    # Check rollout readiness
+    # CRITICAL RACE-CONDITION PREVENTION:
+    # Do NOT proceed until BOTH Kubernetes Deployments actually reference the new build image!
+    if [[ "${BACKEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]] || [[ "${FRONTEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]]; then
+        log_info "[GITOPS] Kubernetes Deployment spec has not yet updated to build ${BUILD_NUMBER}. Waiting..."
+        sleep 5
+        ELAPSED=$((ELAPSED + 5))
+        continue
+    fi
+
+    # Check rollout status once Deployment spec has updated
     BACKEND_READY=false
     FRONTEND_READY=false
 
@@ -233,7 +251,13 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
         FRONTEND_READY=true
     fi
 
-    if [ "${BACKEND_READY}" = "true" ] && [ "${FRONTEND_READY}" = "true" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
+    # Verify actual running pod images match BUILD_NUMBER
+    POD_BACKEND_IMG=$(kubectl get pods -n civicpulse -l app.kubernetes.io/component=backend -o jsonpath='{.items[0].spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "")
+    POD_FRONTEND_IMG=$(kubectl get pods -n civicpulse -l app.kubernetes.io/component=frontend -o jsonpath='{.items[0].spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "")
+
+    if [ "${BACKEND_READY}" = "true" ] && [ "${FRONTEND_READY}" = "true" ] && \
+       [ "${HEALTH_STATUS}" = "Healthy" ] && [ "${SYNC_STATUS}" = "Synced" ] && \
+       [[ "${POD_BACKEND_IMG}" == *":${BUILD_NUMBER}"* ]] && [[ "${POD_FRONTEND_IMG}" == *":${BUILD_NUMBER}"* ]]; then
         ROLLOUT_COMPLETE=true
         break
     fi
@@ -242,32 +266,27 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
     ELAPSED=$((ELAPSED + 5))
 done
 
-# ── 5. Rendered Workload Verification & Output Summary ────────────────────────
+# ── 5. Workload Verification & Output Summary ─────────────────────────────────
 if [ "${ROLLOUT_COMPLETE}" = "true" ]; then
-    BACKEND_LIVE_IMG=$(kubectl get deployment civicpulse-backend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "unknown")
-    FRONTEND_LIVE_IMG=$(kubectl get deployment civicpulse-frontend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "unknown")
-
-    if [[ "${BACKEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]]; then
-        log_error "VERIFICATION FAILED: Live backend image '${BACKEND_LIVE_IMG}' does not match build '${BUILD_NUMBER}'"
-        exit 1
-    fi
-    if [[ "${FRONTEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]]; then
-        log_error "VERIFICATION FAILED: Live frontend image '${FRONTEND_LIVE_IMG}' does not match build '${BUILD_NUMBER}'"
-        exit 1
-    fi
-
     echo ""
     echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}  STAGE 11 — ARGO CD DEPLOYMENT SUCCESS                   ${NC}"
     echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
     echo "  Build Number      : ${BUILD_NUMBER}"
-    echo "  Backend Image     : ${BACKEND_LIVE_IMG}"
-    echo "  Frontend Image    : ${FRONTEND_LIVE_IMG}"
+    echo "  Backend Image     : ghcr.io/tharunadhithyaa/civicpulse-backend:${BUILD_NUMBER}"
+    echo "  Frontend Image    : ghcr.io/tharunadhithyaa/civicpulse-frontend:${BUILD_NUMBER}"
     echo "  MongoDB Image     : ${EXPECTED_MONGODB}"
     echo "  Nginx Image       : ${EXPECTED_NGINX}"
+    echo ""
     echo "  Argo CD Sync      : Synced"
-    echo "  Backend Rollout   : Successful (1/1 Ready)"
-    echo "  Frontend Rollout  : Successful (1/1 Ready)"
+    echo "  Argo CD Health    : Healthy"
+    echo "  Backend Image     : VERIFIED :${BUILD_NUMBER}"
+    echo "  Frontend Image    : VERIFIED :${BUILD_NUMBER}"
+    echo "  Backend Rollout   : Successful"
+    echo "  Frontend Rollout  : Successful"
+    echo "  Backend Pods      : 1/1 Ready"
+    echo "  Frontend Pods     : 1/1 Ready"
+    echo ""
     echo "  Deployment Status : SUCCESS"
     echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
     echo ""
@@ -277,6 +296,11 @@ else
     log_error "  STAGE 11 — DEPLOYMENT DIAGNOSTICS                       "
     log_error "══════════════════════════════════════════════════════════"
     log_error "Deployment rollout failed to complete within ${DEPLOYMENT_TIMEOUT}s."
+    echo ""
+    log_error "Expected Backend Image : ${EXPECTED_BACKEND}"
+    log_error "Actual Backend Image   : ${BACKEND_LIVE_IMG:-unknown}"
+    log_error "Expected Frontend Image: ${EXPECTED_FRONTEND}"
+    log_error "Actual Frontend Image  : ${FRONTEND_LIVE_IMG:-unknown}"
     echo ""
     log_info "=== Kubernetes Resource Overview (civicpulse namespace) ==="
     kubectl get pods -n civicpulse -o wide --request-timeout=10s 2>/dev/null || true
