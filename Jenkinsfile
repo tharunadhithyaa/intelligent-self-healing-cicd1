@@ -1117,10 +1117,15 @@ ENVEOF
                     
                     echo "[GITOPS] Initiating Argo CD deployment stage for build #${BUILD_NUMBER}..."
 
-                    sh """
-                        ./jenkins/scripts/update-gitops.sh \
-                            --build-number "${BUILD_NUMBER}"
-                    """
+                    withCredentials([
+                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
+                    ]) {
+                        sh """
+                            ./jenkins/scripts/update-gitops.sh \
+                                --build-number "${BUILD_NUMBER}"
+                        """
+                    }
+
 
                     // Optional direct Helm fallback if DEPLOY_METHOD is explicitly set to 'helm-direct'
                     if (env.DEPLOY_METHOD == 'helm-direct') {

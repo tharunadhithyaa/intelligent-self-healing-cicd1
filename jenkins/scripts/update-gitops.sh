@@ -94,6 +94,33 @@ if ! kubectl get application civicpulse -n argocd >/dev/null 2>&1; then
 fi
 log_ok "Argo CD Application 'civicpulse' found in namespace 'argocd'"
 
+# ── Ensure Secrets Exist in Target Namespace 'civicpulse' ───────────────────
+kubectl create namespace civicpulse --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+
+GHCR_USER="${GHCR_USERNAME:-${GHCR_USER:-${GHCR_OWNER:-tharunadhithyaa}}}"
+if [ -n "${GHCR_TOKEN:-}" ]; then
+    log_info "Ensuring secret 'ghcr-secret' exists in namespace 'civicpulse'..."
+    kubectl create secret docker-registry ghcr-secret \
+        --namespace civicpulse \
+        --docker-server="${GHCR_REGISTRY:-ghcr.io}" \
+        --docker-username="${GHCR_USER}" \
+        --docker-password="${GHCR_TOKEN}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
+    log_ok "ghcr-secret ready in namespace 'civicpulse'"
+fi
+
+JWT_ACCESS_SECRET_VAL="${JWT_ACCESS_SECRET:-civicpulse-ci-access-secret}"
+JWT_REFRESH_SECRET_VAL="${JWT_REFRESH_SECRET:-civicpulse-ci-refresh-secret}"
+DEFAULT_PASSWORD_VAL="${DEFAULT_PASSWORD:-CivicPulse@2026}"
+kubectl create secret generic civicpulse-secret \
+    --namespace civicpulse \
+    --from-literal=JWT_ACCESS_SECRET="${JWT_ACCESS_SECRET_VAL}" \
+    --from-literal=JWT_REFRESH_SECRET="${JWT_REFRESH_SECRET_VAL}" \
+    --from-literal=DEFAULT_PASSWORD="${DEFAULT_PASSWORD_VAL}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
+log_ok "civicpulse-secret ready in namespace 'civicpulse'"
+
+
 log_info "Applying Argo CD Application parameter overrides for build '${BUILD_NUMBER}'..."
 if ! kubectl patch application civicpulse -n argocd --type merge -p "{
   \"spec\": {
