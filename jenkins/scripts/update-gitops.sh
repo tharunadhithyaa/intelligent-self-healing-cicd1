@@ -121,16 +121,14 @@ kubectl create secret generic civicpulse-secret \
 log_ok "civicpulse-secret ready in namespace 'civicpulse'"
 
 
-log_info "Applying Argo CD Application parameter overrides for build '${BUILD_NUMBER}'..."
+log_info "Applying Argo CD Application parameter overrides for build '${BUILD_NUMBER}' (backend & frontend)..."
 if ! kubectl patch application civicpulse -n argocd --type merge -p "{
   \"spec\": {
     \"source\": {
       \"helm\": {
         \"parameters\": [
           {\"name\": \"frontend.image.tag\", \"value\": \"${BUILD_NUMBER}\"},
-          {\"name\": \"backend.image.tag\", \"value\": \"${BUILD_NUMBER}\"},
-          {\"name\": \"mongodb.image.tag\", \"value\": \"${BUILD_NUMBER}\"},
-          {\"name\": \"nginx.image.tag\", \"value\": \"${BUILD_NUMBER}\"}
+          {\"name\": \"backend.image.tag\", \"value\": \"${BUILD_NUMBER}\"}
         ]
       }
     }
@@ -173,7 +171,24 @@ if [ "${SYNCED}" = "true" ]; then
 else
     log_error "Argo CD application 'civicpulse' failed to synchronize or reach Healthy status within ${MAX_WAIT_SECONDS}s."
     log_error "Final Sync Status: '${SYNC_STATUS:-Unknown}' | Health Status: '${HEALTH_STATUS:-Unknown}'"
+    echo ""
+    log_info "Dump of Kubernetes resources in 'civicpulse' namespace:"
+    kubectl get pods -n civicpulse -o wide 2>/dev/null || true
+    kubectl get deployments -n civicpulse 2>/dev/null || true
+    kubectl get statefulsets -n civicpulse 2>/dev/null || true
+    kubectl get replicasets -n civicpulse 2>/dev/null || true
+    log_info "Describing non-running pods:"
+    for pod in $(kubectl get pods -n civicpulse --no-headers 2>/dev/null | grep -v "1/1" | awk '{print $1}'); do
+        log_info "--- Describe Pod ${pod} ---"
+        kubectl describe pod "$pod" -n civicpulse 2>/dev/null || true
+        log_info "--- Logs for Pod ${pod} ---"
+        kubectl logs "$pod" -n civicpulse --all-containers --tail=50 2>/dev/null || true
+    done
+    log_info "Recent Kubernetes events:"
+    kubectl get events -n civicpulse --sort-by='.lastTimestamp' 2>/dev/null | tail -n 25 || true
+    log_info "Argo CD Application YAML summary:"
     kubectl get application civicpulse -n argocd -o yaml 2>/dev/null || true
     exit 1
 fi
+
 
