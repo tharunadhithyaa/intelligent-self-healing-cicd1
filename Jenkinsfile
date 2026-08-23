@@ -107,14 +107,18 @@ pipeline {
                 // Clean workspace before checkout
                 cleanWs()
 
-                // Checkout from SCM (CI branch: main)
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${params.BRANCH_NAME ?: 'main'}"]],
-                    doGenerateSubmoduleConfigurations: false,
-                    extensions: scm.extensions ?: [],
-                    userRemoteConfigs: scm.userRemoteConfigs ?: []
-                ])
+                // Checkout from SCM (uses native job SCM definition for deterministic Poll SCM tracking)
+                if (params.BRANCH_NAME && params.BRANCH_NAME != 'main') {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${params.BRANCH_NAME}"]],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: scm.extensions ?: [],
+                        userRemoteConfigs: scm.userRemoteConfigs ?: []
+                    ])
+                } else {
+                    checkout scm
+                }
 
                 // Display commit information for traceability
                 script {
