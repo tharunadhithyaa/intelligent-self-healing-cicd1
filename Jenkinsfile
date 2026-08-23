@@ -896,8 +896,8 @@ ENVEOF
 
                         def backendGhcrTag     = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-backend:${env.IMAGE_TAG}"
                         def frontendGhcrTag    = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-frontend:${env.IMAGE_TAG}"
-                        def nginxGhcrTag       = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:${env.IMAGE_TAG}"
-                        def mongodbGhcrTag     = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:${env.IMAGE_TAG}"
+                        def nginxGhcrLatest    = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest"
+                        def mongodbGhcrLatest  = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest"
 
                         if (isUnix()) {
                             sh """
@@ -908,11 +908,11 @@ ENVEOF
                                 echo "  ✅ Logged in to GHCR successfully"
 
                                 echo ""
-                                echo "🏷️ Tagging container images for GHCR (tag: ${env.IMAGE_TAG})..."
+                                echo "🏷️ Tagging container images for GHCR (backend/frontend: ${env.IMAGE_TAG}, mongodb/nginx: latest)..."
                                 docker tag ${backendLocal} ${backendGhcrTag}
                                 docker tag ${frontendLocal} ${frontendGhcrTag}
-                                docker tag ${nginxLocal} ${nginxGhcrTag}
-                                docker tag ${mongodbLocal} ${mongodbGhcrTag}
+                                docker tag ${nginxLocal} ${nginxGhcrLatest}
+                                docker tag ${mongodbLocal} ${mongodbGhcrLatest}
 
                                 push_with_retry() {
                                     local img="\$1"
@@ -936,7 +936,6 @@ ENVEOF
                                         echo "⚠️ Push attempt \${attempt} failed for \${img}:"
                                         echo "\${output}"
 
-                                        # Non-retryable auth / permission check
                                         if echo "\${output}" | grep -iE "unauthorized|authentication|permission denied|invalid credentials|repository not found|401|403" >/dev/null 2>&1; then
                                             echo "❌ FATAL: Unrecoverable authentication or permission error. Halting pipeline."
                                             return 1
@@ -955,18 +954,18 @@ ENVEOF
                                 }
 
                                 echo ""
-                                echo "🚀 Pushing container images to GHCR with automated retries for transient errors..."
+                                echo "🚀 Pushing container images to GHCR..."
                                 push_with_retry "${backendGhcrTag}" || exit 1
                                 push_with_retry "${frontendGhcrTag}" || exit 1
-                                push_with_retry "${nginxGhcrTag}" || exit 1
-                                push_with_retry "${mongodbGhcrTag}" || exit 1
+                                push_with_retry "${nginxGhcrLatest}" || exit 1
+                                push_with_retry "${mongodbGhcrLatest}" || exit 1
 
                                 echo ""
-                                echo "✅ Successfully pushed build-number images to GHCR:"
+                                echo "✅ Successfully pushed container images to GHCR:"
                                 echo "   • ${backendGhcrTag}"
                                 echo "   • ${frontendGhcrTag}"
-                                echo "   • ${nginxGhcrTag}"
-                                echo "   • ${mongodbGhcrTag}"
+                                echo "   • ${nginxGhcrLatest}"
+                                echo "   • ${mongodbGhcrLatest}"
                             """
                         } else {
                             bat """
@@ -977,11 +976,11 @@ ENVEOF
                                 echo   ✅ Logged in to GHCR successfully
 
                                 echo.
-                                echo 🏷️ Tagging container images for GHCR (tag: ${env.IMAGE_TAG})...
+                                echo 🏷️ Tagging container images for GHCR (backend/frontend: ${env.IMAGE_TAG}, mongodb/nginx: latest)...
                                 docker tag ${backendLocal} ${backendGhcrTag}
                                 docker tag ${frontendLocal} ${frontendGhcrTag}
-                                docker tag ${nginxLocal} ${nginxGhcrTag}
-                                docker tag ${mongodbLocal} ${mongodbGhcrTag}
+                                docker tag ${nginxLocal} ${nginxGhcrLatest}
+                                docker tag ${mongodbLocal} ${mongodbGhcrLatest}
                                 if errorlevel 1 exit /b 1
 
                                 echo.
@@ -990,17 +989,17 @@ ENVEOF
                                 if errorlevel 1 exit /b 1
                                 docker push ${frontendGhcrTag}
                                 if errorlevel 1 exit /b 1
-                                docker push ${nginxGhcrTag}
+                                docker push ${nginxGhcrLatest}
                                 if errorlevel 1 exit /b 1
-                                docker push ${mongodbGhcrTag}
+                                docker push ${mongodbGhcrLatest}
                                 if errorlevel 1 exit /b 1
 
                                 echo.
                                 echo ✅ Successfully pushed container images to GHCR:
                                 echo    • ${backendGhcrTag}
                                 echo    • ${frontendGhcrTag}
-                                echo    • ${nginxGhcrTag}
-                                echo    • ${mongodbGhcrTag}
+                                echo    • ${nginxGhcrLatest}
+                                echo    • ${mongodbGhcrLatest}
                             """
                         }
                     }
@@ -1025,8 +1024,8 @@ ENVEOF
                     echo ""
                     echo "Backend:  ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-backend:${env.IMAGE_TAG}"
                     echo "Frontend: ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-frontend:${env.IMAGE_TAG}"
-                    echo "Nginx:    ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:${env.IMAGE_TAG}"
-                    echo "MongoDB:  ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:${env.IMAGE_TAG}"
+                    echo "Nginx:    ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest"
+                    echo "MongoDB:  ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest"
                     echo "=================================================="
 
                     withCredentials([usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')]) {
@@ -1041,16 +1040,22 @@ ENVEOF
                                 echo ""
                                 echo "🔍 Verifying images exist in GHCR before deployment..."
 
-                                for repo_name in "civicpulse-backend" "civicpulse-frontend" "civicpulse-mongodb" "civicpulse-nginx"; do
-                                    img="${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/\${repo_name}:${env.IMAGE_TAG}"
-                                    short_name="\${repo_name#civicpulse-}"
+                                check_img() {
+                                    local img="\$1"
+                                    local label="\$2"
                                     echo "  Verifying image: \${img}..."
                                     if ! docker manifest inspect "\${img}" >/dev/null 2>&1; then
                                         echo "  ❌ FATAL: Image manifest not found in GHCR: \${img}"
                                         exit 1
                                     fi
-                                    echo "[IMAGE VERIFY] \${short_name}:${env.IMAGE_TAG} FOUND"
-                                done
+                                    echo "[IMAGE VERIFY] \${label} FOUND"
+                                }
+
+                                check_img "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-backend:${env.IMAGE_TAG}" "backend:${env.IMAGE_TAG}"
+                                check_img "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-frontend:${env.IMAGE_TAG}" "frontend:${env.IMAGE_TAG}"
+                                check_img "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest" "nginx:latest"
+                                check_img "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest" "mongodb:latest"
+
                                 echo ""
                                 echo "✅ All required container images verified in GHCR"
                             """
@@ -1079,19 +1084,19 @@ ENVEOF
                                 )
                                 echo [IMAGE VERIFY] frontend:${env.IMAGE_TAG} FOUND
 
-                                docker manifest inspect ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:${env.IMAGE_TAG} >nul 2>&1
+                                docker manifest inspect ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest >nul 2>&1
                                 if errorlevel 1 (
-                                    echo ❌ FATAL: Image manifest not found in GHCR: ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:${env.IMAGE_TAG}
+                                    echo ❌ FATAL: Image manifest not found in GHCR: ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest
                                     exit /b 1
                                 )
-                                echo [IMAGE VERIFY] mongodb:${env.IMAGE_TAG} FOUND
+                                echo [IMAGE VERIFY] nginx:latest FOUND
 
-                                docker manifest inspect ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:${env.IMAGE_TAG} >nul 2>&1
+                                docker manifest inspect ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest >nul 2>&1
                                 if errorlevel 1 (
-                                    echo ❌ FATAL: Image manifest not found in GHCR: ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:${env.IMAGE_TAG}
+                                    echo ❌ FATAL: Image manifest not found in GHCR: ${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest
                                     exit /b 1
                                 )
-                                echo [IMAGE VERIFY] nginx:${env.IMAGE_TAG} FOUND
+                                echo [IMAGE VERIFY] mongodb:latest FOUND
 
                                 echo.
                                 echo ✅ All required container images verified in GHCR

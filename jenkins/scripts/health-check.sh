@@ -227,17 +227,17 @@ run_kubernetes_health_check() {
 
     log_info "Using KUBECONFIG=${KUBECONFIG}"
     log_info "Checking K3s cluster connectivity..."
-    kubectl version --client >/dev/null 2>&1 || true
-    kubectl cluster-info >/dev/null 2>&1 || true
+    kubectl version --client --request-timeout=10s >/dev/null 2>&1 || true
+    kubectl cluster-info --request-timeout=10s >/dev/null 2>&1 || true
 
-    if ! kubectl get nodes >/dev/null 2>&1; then
+    if ! kubectl get nodes --request-timeout=10s >/dev/null 2>&1; then
         log_error "Cannot connect to Kubernetes cluster using KUBECONFIG=${KUBECONFIG}."
         exit 1
     fi
     log_ok "K3s cluster accessible"
 
     log_info "Pre-check Kubernetes resource overview:"
-    kubectl get pods -n "$NAMESPACE" -o wide 2>/dev/null || true
+    kubectl get pods -n "$NAMESPACE" -o wide --request-timeout=10s 2>/dev/null || true
     echo ""
 
     local attempt=0
@@ -254,7 +254,7 @@ run_kubernetes_health_check() {
         # 0. Check for any failing / stuck pods
         log_info "Checking for failed or extra pods in namespace '$NAMESPACE'..."
         local bad_pods
-        bad_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -v "Running" || true)
+        bad_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers --request-timeout=10s 2>/dev/null | grep -v "Running" || true)
         if [ -n "$bad_pods" ]; then
             log_warn "Detected non-running pods in namespace '$NAMESPACE':"
             echo "$bad_pods"
@@ -264,7 +264,7 @@ run_kubernetes_health_check() {
         # Verify exact 1 pod count per component
         for comp in backend frontend nginx mongodb; do
             local pod_count
-            pod_count=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component="$comp" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            pod_count=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component="$comp" --no-headers --request-timeout=10s 2>/dev/null | wc -l | tr -d ' ')
             if [ "$pod_count" -eq 1 ]; then
                 log_ok "Component '$comp' — exactly 1 pod found"
             else
@@ -307,7 +307,7 @@ run_kubernetes_health_check() {
         log_info "Checking Kubernetes service endpoints..."
         for svc in civicpulse-backend civicpulse-frontend civicpulse-mongodb civicpulse-nginx; do
             local ep_ip
-            ep_ip=$(kubectl get endpoints "$svc" -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+            ep_ip=$(kubectl get endpoints "$svc" -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' --request-timeout=10s 2>/dev/null || true)
             if [ -n "$ep_ip" ]; then
                 log_ok "Service $svc — Endpoint IP(s): $ep_ip"
             else
@@ -319,10 +319,10 @@ run_kubernetes_health_check() {
         # 3. Backend API Internal Endpoint (/api/health)
         log_info "Checking Backend API (/api/health)..."
         local backend_pod
-        backend_pod=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=backend --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+        backend_pod=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=backend --no-headers --request-timeout=10s 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
         if [ -n "$backend_pod" ]; then
             local b_resp
-            b_resp=$(kubectl exec "$backend_pod" -n "$NAMESPACE" -- wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null || echo '{}')
+            b_resp=$(kubectl exec "$backend_pod" -n "$NAMESPACE" --request-timeout=10s -- wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null || echo '{}')
             if echo "$b_resp" | grep -q '"status":"up"' || echo "$b_resp" | grep -q '"status":"UP"'; then
                 log_ok "Backend API /api/health — UP (via pod $backend_pod)"
             else
@@ -337,10 +337,10 @@ run_kubernetes_health_check() {
         # 4. Frontend Internal Endpoint (/)
         log_info "Checking Frontend static content (/)..."
         local frontend_pod
-        frontend_pod=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=frontend --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+        frontend_pod=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=frontend --no-headers --request-timeout=10s 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
         if [ -n "$frontend_pod" ]; then
             local f_resp
-            f_resp=$(kubectl exec "$frontend_pod" -n "$NAMESPACE" -- wget -qO- http://127.0.0.1/ 2>/dev/null || echo '')
+            f_resp=$(kubectl exec "$frontend_pod" -n "$NAMESPACE" --request-timeout=10s -- wget -qO- http://127.0.0.1/ 2>/dev/null || echo '')
             if echo "$f_resp" | grep -q -E "<html|<app-root"; then
                 log_ok "Frontend / — OK (via pod $frontend_pod)"
             else
@@ -355,10 +355,10 @@ run_kubernetes_health_check() {
         # 5. Nginx Reverse Proxy Internal Endpoints (/health and /api/health)
         log_info "Checking Nginx Reverse Proxy (/health & /api/health)..."
         local nginx_pod
-        nginx_pod=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=nginx --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+        nginx_pod=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=nginx --no-headers --request-timeout=10s 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
         if [ -n "$nginx_pod" ]; then
             local n_health
-            n_health=$(kubectl exec "$nginx_pod" -n "$NAMESPACE" -- wget -qO- http://127.0.0.1/health 2>/dev/null || echo '')
+            n_health=$(kubectl exec "$nginx_pod" -n "$NAMESPACE" --request-timeout=10s -- wget -qO- http://127.0.0.1/health 2>/dev/null || echo '')
             if [ "$n_health" = "OK" ]; then
                 log_ok "Nginx /health — OK (via pod $nginx_pod)"
             else
@@ -367,7 +367,7 @@ run_kubernetes_health_check() {
             fi
 
             local n_api
-            n_api=$(kubectl exec "$nginx_pod" -n "$NAMESPACE" -- wget -qO- http://127.0.0.1/api/health 2>/dev/null || echo '{}')
+            n_api=$(kubectl exec "$nginx_pod" -n "$NAMESPACE" --request-timeout=10s -- wget -qO- http://127.0.0.1/api/health 2>/dev/null || echo '{}')
             if echo "$n_api" | grep -q '"status":"up"' || echo "$n_api" | grep -q '"status":"UP"'; then
                 log_ok "Nginx /api/health routing to backend — UP (via pod $nginx_pod)"
             else
@@ -404,18 +404,18 @@ run_kubernetes_health_check() {
         log_error "Kubernetes health checks FAILED after $MAX_RETRIES attempts"
         echo ""
         log_error "Dumping Kubernetes resources for diagnosis:"
-        kubectl get pods -n "$NAMESPACE" -o wide 2>/dev/null || true
-        kubectl get deployments -n "$NAMESPACE" 2>/dev/null || true
-        kubectl get statefulsets -n "$NAMESPACE" 2>/dev/null || true
-        kubectl get services -n "$NAMESPACE" 2>/dev/null || true
-        kubectl get endpoints -n "$NAMESPACE" 2>/dev/null || true
-        kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' 2>/dev/null || true
+        kubectl get pods -n "$NAMESPACE" -o wide --request-timeout=10s 2>/dev/null || true
+        kubectl get deployments -n "$NAMESPACE" --request-timeout=10s 2>/dev/null || true
+        kubectl get statefulsets -n "$NAMESPACE" --request-timeout=10s 2>/dev/null || true
+        kubectl get services -n "$NAMESPACE" --request-timeout=10s 2>/dev/null || true
+        kubectl get endpoints -n "$NAMESPACE" --request-timeout=10s 2>/dev/null || true
+        kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' --request-timeout=10s 2>/dev/null || true
 
         log_error "Dumping logs for non-ready/unhealthy pods:"
-        for pod in $(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | awk '{print $1}'); do
+        for pod in $(kubectl get pods -n "$NAMESPACE" --no-headers --request-timeout=10s 2>/dev/null | awk '{print $1}'); do
             log_info "--- Logs for pod $pod ---"
-            kubectl logs "$pod" -n "$NAMESPACE" --tail=100 2>/dev/null || true
-            kubectl logs "$pod" -n "$NAMESPACE" --previous --tail=100 2>/dev/null || true
+            kubectl logs "$pod" -n "$NAMESPACE" --tail=100 --request-timeout=10s 2>/dev/null || true
+            kubectl logs "$pod" -n "$NAMESPACE" --previous --tail=100 --request-timeout=10s 2>/dev/null || true
         done
         exit 1
     fi

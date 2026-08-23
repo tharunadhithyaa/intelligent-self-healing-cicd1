@@ -31,6 +31,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --build-number) BUILD_NUMBER="$2"; shift 2 ;;
+        [0-9]*)         BUILD_NUMBER="$1"; shift 1 ;;
         *) shift ;;
     esac
 done
@@ -47,8 +48,8 @@ cd "${REPO_ROOT}"
 
 EXPECTED_BACKEND="ghcr.io/tharunadhithyaa/civicpulse-backend:${BUILD_NUMBER}"
 EXPECTED_FRONTEND="ghcr.io/tharunadhithyaa/civicpulse-frontend:${BUILD_NUMBER}"
-EXPECTED_MONGODB="ghcr.io/tharunadhithyaa/civicpulse-mongodb:${BUILD_NUMBER}"
-EXPECTED_NGINX="ghcr.io/tharunadhithyaa/civicpulse-nginx:${BUILD_NUMBER}"
+EXPECTED_MONGODB="ghcr.io/tharunadhithyaa/civicpulse-mongodb:latest"
+EXPECTED_NGINX="ghcr.io/tharunadhithyaa/civicpulse-nginx:latest"
 
 log_info "Target Backend image : ${EXPECTED_BACKEND}"
 log_info "Target Frontend image: ${EXPECTED_FRONTEND}"
@@ -62,7 +63,7 @@ if [ -d "${HELM_DIR}" ] && command -v helm &>/dev/null; then
     helm lint "${HELM_DIR}" >/dev/null 2>&1 || log_warn "Helm lint warning (non-blocking)"
 fi
 
-# ── 2. Update Argo CD Application Parameter Overrides (Zero Commit on Main) ──
+# ── 2. Update Argo CD Application Parameter Overrides (Zero Commit) ───────────
 if [ -z "${KUBECONFIG:-}" ]; then
     if [ -f "${HOME}/.kube/config" ] && [ -r "${HOME}/.kube/config" ]; then
         export KUBECONFIG="${HOME}/.kube/config"
@@ -82,30 +83,31 @@ fi
 
 log_info "Using KUBECONFIG=${KUBECONFIG:-unset}"
 
-if ! kubectl get nodes >/dev/null 2>&1; then
+if ! kubectl get nodes --request-timeout=10s >/dev/null 2>&1; then
     log_error "Cannot connect to Kubernetes cluster using KUBECONFIG=${KUBECONFIG:-unset}."
     exit 1
 fi
 log_ok "K3s cluster accessible"
 
-if ! kubectl get application civicpulse -n argocd >/dev/null 2>&1; then
+if ! kubectl get application civicpulse -n argocd --request-timeout=10s >/dev/null 2>&1; then
     log_error "Argo CD Application 'civicpulse' not accessible in namespace 'argocd'."
     exit 1
 fi
 log_ok "Argo CD Application 'civicpulse' found in namespace 'argocd'"
 
-# ── Ensure Secrets Exist in Target Namespace 'civicpulse' ───────────────────
-kubectl create namespace civicpulse --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+# ── Ensure Namespace and Secrets Exist ────────────────────────────────────────
+kubectl create namespace civicpulse --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1 || true
 
-GHCR_USER="${GHCR_USERNAME:-${GHCR_USER:-${GHCR_OWNER:-tharunadhithyaa}}}"
-if [ -n "${GHCR_TOKEN:-}" ]; then
+GHCR_USER=$(echo "${GHCR_USERNAME:-${GHCR_USER:-${GHCR_OWNER:-tharunadhithyaa}}}" | tr -d ' \r\n\t')
+GHCR_TOKEN_VAL=$(echo "${GHCR_TOKEN:-}" | tr -d ' \r\n\t')
+if [ -n "${GHCR_TOKEN_VAL}" ]; then
     log_info "Ensuring secret 'ghcr-secret' exists in namespace 'civicpulse'..."
     kubectl create secret docker-registry ghcr-secret \
         --namespace civicpulse \
         --docker-server="${GHCR_REGISTRY:-ghcr.io}" \
         --docker-username="${GHCR_USER}" \
-        --docker-password="${GHCR_TOKEN}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
+        --docker-password="${GHCR_TOKEN_VAL}" \
+        --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
     log_ok "ghcr-secret ready in namespace 'civicpulse'"
 fi
 
@@ -117,12 +119,17 @@ kubectl create secret generic civicpulse-secret \
     --from-literal=JWT_ACCESS_SECRET="${JWT_ACCESS_SECRET_VAL}" \
     --from-literal=JWT_REFRESH_SECRET="${JWT_REFRESH_SECRET_VAL}" \
     --from-literal=DEFAULT_PASSWORD="${DEFAULT_PASSWORD_VAL}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
+    --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
 log_ok "civicpulse-secret ready in namespace 'civicpulse'"
 
+# ── Retrieve and Log Pre-Patch Application Parameters ─────────────────────────
+log_info "Inspecting existing Argo CD Application spec parameters..."
+PREV_PARAMS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.source.helm.parameters}' --request-timeout=10s 2>/dev/null || echo "[]")
+log_info "Current spec parameters before patch: ${PREV_PARAMS}"
 
+# ── Patch Argo CD Application Parameters ──────────────────────────────────────
 log_info "Applying Argo CD Application parameter overrides for build '${BUILD_NUMBER}' (backend & frontend)..."
-if ! kubectl patch application civicpulse -n argocd --type merge -p "{
+if ! kubectl patch application civicpulse -n argocd --type merge --request-timeout=10s -p "{
   \"spec\": {
     \"source\": {
       \"helm\": {
@@ -138,11 +145,22 @@ if ! kubectl patch application civicpulse -n argocd --type merge -p "{
     exit 1
 fi
 
-log_ok "Argo CD Application parameter overrides applied successfully (zero Git commits)"
+log_ok "Argo CD Application parameter overrides patch submitted"
+
+# ── Verify Live Application Spec Parameters Immediately After Patch ───────────
+FRONTEND_SPEC_TAG=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.source.helm.parameters[?(@.name=="frontend.image.tag")].value}' --request-timeout=10s 2>/dev/null || echo "")
+BACKEND_SPEC_TAG=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.source.helm.parameters[?(@.name=="backend.image.tag")].value}' --request-timeout=10s 2>/dev/null || echo "")
+
+if [ "${FRONTEND_SPEC_TAG}" != "${BUILD_NUMBER}" ] || [ "${BACKEND_SPEC_TAG}" != "${BUILD_NUMBER}" ]; then
+    log_error "VERIFICATION FAILED: Argo CD Application live spec does NOT contain target build '${BUILD_NUMBER}'!"
+    log_error "Live spec values — frontend.image.tag: '${FRONTEND_SPEC_TAG}', backend.image.tag: '${BACKEND_SPEC_TAG}'"
+    exit 1
+fi
+log_ok "Verified Argo CD Application live spec parameters: frontend=${FRONTEND_SPEC_TAG}, backend=${BACKEND_SPEC_TAG}"
 
 # ── 3. Argo CD Application Refresh & Synchronization Wait ─────────────────────
 log_info "Triggering Argo CD application refresh via Kubernetes API..."
-kubectl annotate application civicpulse -n argocd argocd.argoproj.io/refresh=normal --overwrite >/dev/null 2>&1 || true
+kubectl annotate application civicpulse -n argocd argocd.argoproj.io/refresh=normal --overwrite --request-timeout=10s >/dev/null 2>&1 || true
 
 log_info "Waiting for Argo CD to synchronize application 'civicpulse' and reach Healthy state..."
 MAX_WAIT_SECONDS=120
@@ -150,8 +168,8 @@ ELAPSED=0
 SYNCED=false
 
 while [ $ELAPSED -lt $MAX_WAIT_SECONDS ]; do
-    SYNC_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
-    HEALTH_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+    SYNC_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.sync.status}' --request-timeout=10s 2>/dev/null || echo "Unknown")
+    HEALTH_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.health.status}' --request-timeout=10s 2>/dev/null || echo "Unknown")
 
     log_info "Argo CD Status — Sync: '${SYNC_STATUS}' | Health: '${HEALTH_STATUS}' (${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
 
@@ -164,31 +182,54 @@ while [ $ELAPSED -lt $MAX_WAIT_SECONDS ]; do
     ELAPSED=$((ELAPSED + 5))
 done
 
+# ── 4. Rendered Manifest Verification & Diagnostic Output ─────────────────────
 if [ "${SYNCED}" = "true" ]; then
     log_ok "Argo CD application 'civicpulse' successfully synchronized and is Healthy"
+
+    log_info "Verifying actual rendered Kubernetes Deployment pod templates in namespace 'civicpulse'..."
+    BACKEND_LIVE_IMG=$(kubectl get deployment civicpulse-backend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "unknown")
+    FRONTEND_LIVE_IMG=$(kubectl get deployment civicpulse-frontend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null || echo "unknown")
+
+    log_info "Live Backend Deployment Image : ${BACKEND_LIVE_IMG}"
+    log_info "Live Frontend Deployment Image: ${FRONTEND_LIVE_IMG}"
+
+    if [[ "${BACKEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]]; then
+        log_error "VERIFICATION FAILED: Live backend deployment image '${BACKEND_LIVE_IMG}' does not use target build '${BUILD_NUMBER}'"
+        exit 1
+    fi
+    if [[ "${FRONTEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]]; then
+        log_error "VERIFICATION FAILED: Live frontend deployment image '${FRONTEND_LIVE_IMG}' does not use target build '${BUILD_NUMBER}'"
+        exit 1
+    fi
+
+    log_ok "Verified live Deployments in Kubernetes match target build '${BUILD_NUMBER}'!"
     log_ok "Argo CD deployment update completed successfully for build '${BUILD_NUMBER}'"
     exit 0
 else
-    log_error "Argo CD application 'civicpulse' failed to synchronize or reach Healthy status within ${MAX_WAIT_SECONDS}s."
+    log_error "Argo CD application 'civicpulse' failed to reach Synced/Healthy status within ${MAX_WAIT_SECONDS}s."
     log_error "Final Sync Status: '${SYNC_STATUS:-Unknown}' | Health Status: '${HEALTH_STATUS:-Unknown}'"
     echo ""
-    log_info "Dump of Kubernetes resources in 'civicpulse' namespace:"
-    kubectl get pods -n civicpulse -o wide 2>/dev/null || true
-    kubectl get deployments -n civicpulse 2>/dev/null || true
-    kubectl get statefulsets -n civicpulse 2>/dev/null || true
-    kubectl get replicasets -n civicpulse 2>/dev/null || true
-    log_info "Describing non-running pods:"
-    for pod in $(kubectl get pods -n civicpulse --no-headers 2>/dev/null | grep -v "1/1" | awk '{print $1}'); do
+    log_info "=== Kubernetes Resource Overview (civicpulse namespace) ==="
+    kubectl get pods -n civicpulse -o wide --request-timeout=10s 2>/dev/null || true
+    kubectl get deployments -n civicpulse --request-timeout=10s 2>/dev/null || true
+    kubectl get statefulsets -n civicpulse --request-timeout=10s 2>/dev/null || true
+    kubectl get replicasets -n civicpulse --request-timeout=10s 2>/dev/null || true
+
+    log_info "=== Pod Container Images ==="
+    kubectl get pods -n civicpulse -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\t"}{.status.phase}{"\n"}{end}' --request-timeout=10s 2>/dev/null || true
+
+    log_info "=== Diagnostic Details for Non-Running / Non-Ready Pods ==="
+    for pod in $(kubectl get pods -n civicpulse --no-headers --request-timeout=10s 2>/dev/null | grep -v "1/1" | awk '{print $1}'); do
         log_info "--- Describe Pod ${pod} ---"
-        kubectl describe pod "$pod" -n civicpulse 2>/dev/null || true
+        kubectl describe pod "$pod" -n civicpulse --request-timeout=10s 2>/dev/null || true
         log_info "--- Logs for Pod ${pod} ---"
-        kubectl logs "$pod" -n civicpulse --all-containers --tail=50 2>/dev/null || true
+        kubectl logs "$pod" -n civicpulse --all-containers --tail=50 --request-timeout=10s 2>/dev/null || true
     done
-    log_info "Recent Kubernetes events:"
-    kubectl get events -n civicpulse --sort-by='.lastTimestamp' 2>/dev/null | tail -n 25 || true
-    log_info "Argo CD Application YAML summary:"
-    kubectl get application civicpulse -n argocd -o yaml 2>/dev/null || true
+
+    log_info "=== Recent Kubernetes Events ==="
+    kubectl get events -n civicpulse --sort-by='.lastTimestamp' --request-timeout=10s 2>/dev/null | tail -n 25 || true
+
+    log_info "=== Argo CD Application Spec & Status Summary ==="
+    kubectl get application civicpulse -n argocd -o yaml --request-timeout=10s 2>/dev/null || true
     exit 1
 fi
-
-
