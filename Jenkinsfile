@@ -1114,14 +1114,21 @@ ENVEOF
                     env.KUBERNETES_STAGE_REACHED = 'true'
                     sh 'chmod +x jenkins/scripts/update-gitops.sh'
                     
-                    echo "[GITOPS] Initiating Argo CD deployment stage for build #${BUILD_NUMBER}..."
+                    // Validate env.BUILD_NUMBER before calling deployment script
+                    if (!env.BUILD_NUMBER || !env.BUILD_NUMBER.isNumber()) {
+                        error "[GITOPS] ERROR: Invalid or missing numeric BUILD_NUMBER: '${env.BUILD_NUMBER}'"
+                    }
+
+                    echo "[GITOPS] Authoritative Jenkins BUILD_NUMBER: ${env.BUILD_NUMBER}"
+                    echo "[GITOPS] Expected Backend image: ghcr.io/tharunadhithyaa/civicpulse-backend:${env.BUILD_NUMBER}"
+                    echo "[GITOPS] Expected Frontend image: ghcr.io/tharunadhithyaa/civicpulse-frontend:${env.BUILD_NUMBER}"
 
                     withCredentials([
                         usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
                     ]) {
                         sh """
                             ./jenkins/scripts/update-gitops.sh \
-                                --build-number "${BUILD_NUMBER}"
+                                --build-number "${env.BUILD_NUMBER}"
                         """
                     }
 
