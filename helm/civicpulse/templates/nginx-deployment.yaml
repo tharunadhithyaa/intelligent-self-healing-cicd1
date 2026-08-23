@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/component: nginx
 spec:
   replicas: {{ .Values.nginx.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "civicpulse.selectorLabels" . | nindent 6 }}

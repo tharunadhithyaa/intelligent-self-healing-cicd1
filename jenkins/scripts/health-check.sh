@@ -251,6 +251,28 @@ run_kubernetes_health_check() {
         log_info "Kubernetes health check attempt $attempt/$MAX_RETRIES"
         echo "────────────────────────────────────────"
 
+        # 0. Check for any failing / stuck pods
+        log_info "Checking for failed or extra pods in namespace '$NAMESPACE'..."
+        local bad_pods
+        bad_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -v "Running" || true)
+        if [ -n "$bad_pods" ]; then
+            log_warn "Detected non-running pods in namespace '$NAMESPACE':"
+            echo "$bad_pods"
+            failures=$((failures + 1))
+        fi
+
+        # Verify exact 1 pod count per component
+        for comp in backend frontend nginx mongodb; do
+            local pod_count
+            pod_count=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component="$comp" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$pod_count" -eq 1 ]; then
+                log_ok "Component '$comp' — exactly 1 pod found"
+            else
+                log_warn "Component '$comp' — expected 1 pod, found $pod_count pods"
+                failures=$((failures + 1))
+            fi
+        done
+
         # 1. Workload Rollout Status Checks
         log_info "Checking Kubernetes workload rollouts..."
         if kubectl rollout status deployment/civicpulse-backend -n "$NAMESPACE" --timeout=15s >/dev/null 2>&1; then

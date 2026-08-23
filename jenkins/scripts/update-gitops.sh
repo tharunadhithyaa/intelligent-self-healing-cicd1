@@ -142,11 +142,38 @@ fi
 
 log_ok "Argo CD Application parameter overrides applied successfully (zero Git commits)"
 
-# ── 3. Optional Argo CD Sync Trigger ──────────────────────────────────────────
-if command -v argocd &>/dev/null; then
-    log_info "Triggering Argo CD application sync via Argo CD CLI..."
-    argocd app sync civicpulse >/dev/null 2>&1 || log_warn "argocd app sync skipped (CLI unauthenticated or non-blocking)"
+# ── 3. Argo CD Application Refresh & Synchronization Wait ─────────────────────
+log_info "Triggering Argo CD application refresh via Kubernetes API..."
+kubectl annotate application civicpulse -n argocd argocd.argoproj.io/refresh=normal --overwrite >/dev/null 2>&1 || true
+
+log_info "Waiting for Argo CD to synchronize application 'civicpulse' and reach Healthy state..."
+MAX_WAIT_SECONDS=120
+ELAPSED=0
+SYNCED=false
+
+while [ $ELAPSED -lt $MAX_WAIT_SECONDS ]; do
+    SYNC_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+    HEALTH_STATUS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+
+    log_info "Argo CD Status — Sync: '${SYNC_STATUS}' | Health: '${HEALTH_STATUS}' (${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
+
+    if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
+        SYNCED=true
+        break
+    fi
+
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
+done
+
+if [ "${SYNCED}" = "true" ]; then
+    log_ok "Argo CD application 'civicpulse' successfully synchronized and is Healthy"
+    log_ok "Argo CD deployment update completed successfully for build '${BUILD_NUMBER}'"
+    exit 0
+else
+    log_error "Argo CD application 'civicpulse' failed to synchronize or reach Healthy status within ${MAX_WAIT_SECONDS}s."
+    log_error "Final Sync Status: '${SYNC_STATUS:-Unknown}' | Health Status: '${HEALTH_STATUS:-Unknown}'"
+    kubectl get application civicpulse -n argocd -o yaml 2>/dev/null || true
+    exit 1
 fi
 
-log_ok "Argo CD deployment update completed successfully for build '${BUILD_NUMBER}'"
-exit 0
