@@ -15,6 +15,7 @@ import aiChatRoutes from "./modules/ai-chat/ai-chat.routes";
 import officerRoutes from "./modules/officer/officer.routes";
 import fieldWorkerRoutes from "./modules/field-worker/field-worker.routes";
 import notificationRoutes from "./modules/notifications/notification.routes";
+import { metricsMiddleware, metricsHandler } from "./middleware/metrics.middleware";
 
 const app: Application = express();
 
@@ -24,6 +25,13 @@ app.set("trust proxy", true);
 // Security middleware
 app.use(helmet());
 app.use(cors(corsOptions));
+
+// Prometheus metrics endpoints (placed BEFORE rate limiters)
+app.get("/metrics", metricsHandler);
+app.get("/api/metrics", metricsHandler);
+
+// Metrics tracking middleware
+app.use(metricsMiddleware);
 
 // Health check (placed BEFORE rate limiters so K8s probes never fail with 429)
 app.get("/api/health", (_req: Request, res: Response) => {
@@ -51,7 +59,7 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
-  skip: (req: Request) => req.path === "/health" || req.path === "/api/health",
+  skip: (req: Request) => req.path === "/health" || req.path === "/api/health" || req.path === "/metrics" || req.path === "/api/metrics",
   message: {
     success: false,
     message: "Too many requests from this IP, please try again later.",

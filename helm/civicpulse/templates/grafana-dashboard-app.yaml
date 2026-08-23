@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civicpulse-grafana-dashboard-app
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    release: kube-prometheus-stack
+data:
+  civicpulse-app-dashboard.json: |-
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "Backend API Status",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "up{job=\"civicpulse-backend\"}", "legendFormat": "Backend Status" }
+          ],
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        },
+        {
+          "title": "MongoDB Connection Status",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "targets": [
+            { "expr": "civicpulse_db_status", "legendFormat": "DB Status" }
+          ],
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Active HTTP Requests",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "targets": [
+            { "expr": "sum(civicpulse_http_active_requests)", "legendFormat": "Active Requests" }
+          ]
+        },
+        {
+          "title": "HTTP Error Count",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "targets": [
+            { "expr": "sum(civicpulse_http_errors_total)", "legendFormat": "Errors" }
+          ]
+        },
+        {
+          "title": "HTTP Request Rate (RPS)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [
+            { "expr": "sum(rate(civicpulse_http_requests_total[1m])) by (method, route)", "legendFormat": "{{ "{{" }}method{{ "}}" }} {{ "{{" }}route{{ "}}" }}" }
+          ]
+        },
+        {
+          "title": "P95 Request Latency (Seconds)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum(rate(civicpulse_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "P95 Latency" }
+          ]
+        }
+      ],
+      "refresh": "5s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["civicpulse", "application"],
+      "time": { "from": "now-15m", "to": "now" },
+      "title": "CivicPulse Application Monitoring",
+      "uid": "civicpulse-app-monitoring"
+    }

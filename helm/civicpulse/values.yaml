@@ -109,3 +109,9 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true

@@ -1175,6 +1175,44 @@ ENVEOF
         }
 
         // ══════════════════════════════════════════════════════════════════════
+        // STAGE 12.5 — Prometheus & Observability Verification
+        // ══════════════════════════════════════════════════════════════════════
+        stage('Observability Verification') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 12.5 — Prometheus & Observability Verification\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                script {
+                    sh '''
+                        echo "[OBSERVABILITY] Verifying Prometheus & ServiceMonitor setup in Kubernetes..."
+                        
+                        # Verify ServiceMonitor exists
+                        if kubectl get servicemonitor civicpulse-backend-monitor -n civicpulse >/dev/null 2>&1; then
+                            echo "  ✅ ServiceMonitor 'civicpulse-backend-monitor' found in namespace civicpulse"
+                        else
+                            echo "  ⚠️ ServiceMonitor 'civicpulse-backend-monitor' not found in namespace civicpulse"
+                        fi
+
+                        # Verify PrometheusRule exists
+                        if kubectl get prometheusrule civicpulse-alert-rules -n civicpulse >/dev/null 2>&1; then
+                            echo "  ✅ PrometheusRule 'civicpulse-alert-rules' found in namespace civicpulse"
+                        else
+                            echo "  ⚠️ PrometheusRule 'civicpulse-alert-rules' not found in namespace civicpulse"
+                        fi
+
+                        # Verify backend metrics endpoint
+                        if kubectl exec -n civicpulse deployment/civicpulse-backend -- wget -qO- http://localhost:3000/metrics >/dev/null 2>&1; then
+                            echo "  ✅ CivicPulse Backend /metrics endpoint is active and responding with Prometheus metrics"
+                        else
+                            echo "  ⚠️ CivicPulse Backend /metrics endpoint check skipped or unreachable"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
         // STAGE 13 — Deployment Report
         // ══════════════════════════════════════════════════════════════════════
         stage('Deployment Report') {
