@@ -53,7 +53,7 @@ export const dbStatusGauge = new client.Gauge({
 
 // Helper to normalize Express route paths (preventing high cardinality from IDs)
 function getNormalizedRoute(req: Request): string {
-  if (req.route && req.route.path) {
+  if (req.route?.path) {
     const baseUrl = req.baseUrl || "";
     const routePath = req.route.path;
     return `${baseUrl}${routePath === "/" ? "" : routePath}`;
