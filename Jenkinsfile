@@ -912,7 +912,10 @@ ENVEOF
                                     local img="\$1"
                                     local max_attempts=3
                                     local attempt=1
-                                    local delay=5
+                                    local delay=10
+
+                                    local transient_regex="timeout|timed out|awaiting response headers|connection reset|connection refused|EOF|temporary failure|TLS handshake timeout|network is unreachable|i/o timeout|502|503|504|429"
+                                    local auth_regex="unauthorized|authentication required|denied|permission denied|access denied|invalid credentials|repository does not exist|repository not found|\\\\b403\\\\b|\\\\b401\\\\b"
 
                                     while [ \$attempt -le \$max_attempts ]; do
                                         echo "🚀 Pushing \${img} (Attempt \${attempt}/\${max_attempts})..."
@@ -923,27 +926,57 @@ ENVEOF
                                         set -e
 
                                         if [ \$exit_code -eq 0 ]; then
-                                            echo "  ✅ Successfully pushed \${img}"
-                                            return 0
+                                            echo "  🔍 Verifying image \${img} manifest in GHCR..."
+                                            set +e
+                                            docker manifest inspect "\${img}" >/dev/null 2>&1
+                                            local inspect_code=\$?
+                                            set -e
+                                            if [ \$inspect_code -eq 0 ]; then
+                                                echo "  ✅ Successfully pushed and verified \${img}"
+                                                return 0
+                                            else
+                                                echo "  ⚠️ Image push reported exit code 0, but docker manifest inspect failed for \${img}."
+                                                output="docker manifest inspect failed after push"
+                                            fi
                                         fi
 
-                                        echo "⚠️ Push attempt \${attempt} failed for \${img}:"
-                                        echo "\${output}"
+                                        echo "⚠️ Push attempt \${attempt}/\${max_attempts} failed for \${img}"
 
-                                        if echo "\${output}" | grep -iE "unauthorized|authentication|permission denied|invalid credentials|repository not found|401|403" >/dev/null 2>&1; then
-                                            echo "❌ FATAL: Unrecoverable authentication or permission error. Halting pipeline."
+                                        local matched_reason=""
+                                        if echo "\${output}" | grep -iE "\${transient_regex}" >/dev/null 2>&1; then
+                                            matched_reason=\$(echo "\${output}" | grep -iE "\${transient_regex}" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*\$//')
+                                            echo "[GHCR] Image: \${img}"
+                                            echo "[GHCR] Attempt: \${attempt}/\${max_attempts}"
+                                            echo "[GHCR] Failure classification: TRANSIENT_NETWORK"
+                                            echo "[GHCR] Reason: \${matched_reason:-transient registry/network error}"
+                                            echo "⚠️ GHCR push failed due to transient network/registry timeout."
+                                        elif echo "\${output}" | grep -iE "\${auth_regex}" >/dev/null 2>&1; then
+                                            matched_reason=\$(echo "\${output}" | grep -iE "\${auth_regex}" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*\$//')
+                                            echo "[GHCR] Image: \${img}"
+                                            echo "[GHCR] Failure classification: AUTH_PERMISSION_ERROR"
+                                            echo "[GHCR] Reason: \${matched_reason:-authentication or permission error}"
+                                            echo "❌ GHCR authentication/permission failure."
+                                            echo "Not retrying because this is not a transient error."
                                             return 1
+                                        else
+                                            matched_reason=\$(echo "\${output}" | tail -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*\$//')
+                                            echo "[GHCR] Image: \${img}"
+                                            echo "[GHCR] Attempt: \${attempt}/\${max_attempts}"
+                                            echo "[GHCR] Failure classification: TRANSIENT_NETWORK (UNKNOWN_ERROR)"
+                                            echo "[GHCR] Reason: \${matched_reason:-unknown docker push failure}"
+                                            echo "⚠️ GHCR push failed with exit code \${exit_code}."
                                         fi
 
                                         if [ \$attempt -lt \$max_attempts ]; then
-                                            echo "⏳ Waiting \${delay}s before retrying push for \${img}..."
+                                            echo "🔄 Retrying after \${delay}s..."
                                             sleep \$delay
                                             delay=\$((delay * 2))
                                         fi
                                         attempt=\$((attempt + 1))
                                     done
 
-                                    echo "❌ FATAL: Failed to push \${img} after \${max_attempts} attempts."
+                                    echo "❌ GHCR push failed after all \${max_attempts} retry attempts for \${img}."
+                                    echo "Reason: transient GHCR/network timeout."
                                     return 1
                                 }
 
@@ -979,13 +1012,65 @@ ENVEOF
 
                                 echo.
                                 echo 🚀 Pushing container images to GHCR...
-                                docker push ${backendGhcrTag}
-                                if errorlevel 1 exit /b 1
-                                docker push ${frontendGhcrTag}
-                                if errorlevel 1 exit /b 1
-                                docker push ${nginxGhcrLatest}
-                                if errorlevel 1 exit /b 1
-                                docker push ${mongodbGhcrLatest}
+                                powershell -NoProfile -ExecutionPolicy Bypass -Command "^
+                                    function Push-WithRetry([string]\$img) { ^
+                                        \$maxAttempts = 3; ^
+                                        \$attempt = 1; ^
+                                        \$delay = 10; ^
+                                        \$transientRegex = '(?i)(timeout|timed out|awaiting response headers|connection reset|connection refused|EOF|temporary failure|TLS handshake timeout|network is unreachable|i/o timeout|502|503|504|429)'; ^
+                                        \$authRegex = '(?i)(unauthorized|authentication required|denied|permission denied|access denied|invalid credentials|repository does not exist|repository not found|\b403\b|\b401\b)'; ^
+                                        while (\$attempt -le \$maxAttempts) { ^
+                                            Write-Host \"🚀 Pushing \$img (Attempt \$attempt/\$maxAttempts)...\"; ^
+                                            \$output = docker push \$img 2>&1 | Out-String; ^
+                                            if (\$LASTEXITCODE -eq 0) { ^
+                                                Write-Host \"  🔍 Verifying image \$img manifest in GHCR...\"; ^
+                                                docker manifest inspect \$img >\$null 2>&1; ^
+                                                if (\$LASTEXITCODE -eq 0) { ^
+                                                    Write-Host \"  ✅ Successfully pushed and verified \$img\"; ^
+                                                    return \$true; ^
+                                                } else { ^
+                                                    Write-Host \"  ⚠️ Image push reported 0 exit code, but docker manifest inspect failed for \$img.\"; ^
+                                                    \$output = \"docker manifest inspect failed after push\"; ^
+                                                } ^
+                                            } ^
+                                            Write-Host \"⚠️ Push attempt \$attempt/\$maxAttempts failed for \$img\"; ^
+                                            if (\$output -match \$transientRegex) { ^
+                                                \$reason = \$Matches[0]; ^
+                                                Write-Host \"[GHCR] Image: \$img\"; ^
+                                                Write-Host \"[GHCR] Attempt: \$attempt/\$maxAttempts\"; ^
+                                                Write-Host \"[GHCR] Failure classification: TRANSIENT_NETWORK\"; ^
+                                                Write-Host \"[GHCR] Reason: \$reason\"; ^
+                                                Write-Host \"⚠️ GHCR push failed due to transient network/registry timeout.\"; ^
+                                            } elseif (\$output -match \$authRegex) { ^
+                                                \$reason = \$Matches[0]; ^
+                                                Write-Host \"[GHCR] Image: \$img\"; ^
+                                                Write-Host \"[GHCR] Failure classification: AUTH_PERMISSION_ERROR\"; ^
+                                                Write-Host \"[GHCR] Reason: \$reason\"; ^
+                                                Write-Host \"❌ GHCR authentication/permission failure.\"; ^
+                                                Write-Host \"Not retrying because this is not a transient error.\"; ^
+                                                return \$false; ^
+                                            } else { ^
+                                                Write-Host \"[GHCR] Image: \$img\"; ^
+                                                Write-Host \"[GHCR] Attempt: \$attempt/\$maxAttempts\"; ^
+                                                Write-Host \"[GHCR] Failure classification: TRANSIENT_NETWORK (UNKNOWN_ERROR)\"; ^
+                                                Write-Host \"⚠️ GHCR push failed with non-zero exit code.\"; ^
+                                            } ^
+                                            if (\$attempt -lt \$maxAttempts) { ^
+                                                Write-Host \"🔄 Retrying after \$delay s...\"; ^
+                                                Start-Sleep -Seconds \$delay; ^
+                                                \$delay = \$delay * 2; ^
+                                            } ^
+                                            \$attempt++; ^
+                                        } ^
+                                        Write-Host \"❌ GHCR push failed after all \$maxAttempts retry attempts for \$img.\"; ^
+                                        Write-Host \"Reason: transient GHCR/network timeout.\"; ^
+                                        return \$false; ^
+                                    }; ^
+                                    \$images = @('${backendGhcrTag}', '${frontendGhcrTag}', '${nginxGhcrLatest}', '${mongodbGhcrLatest}'); ^
+                                    foreach (\$img in \$images) { ^
+                                        if (-not (Push-WithRetry \$img)) { exit 1 } ^
+                                    } ^
+                                "
                                 if errorlevel 1 exit /b 1
 
                                 echo.
