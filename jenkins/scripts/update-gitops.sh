@@ -149,18 +149,24 @@ kubectl create secret generic civicpulse-secret \
     --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
 log_ok "civicpulse-secret ready in namespace 'civicpulse'"
 
-GRAFANA_ADMIN_USER_VAL="${GRAFANA_ADMIN_USER:-admin}"
-GRAFANA_ADMIN_PASSWORD_VAL="${GRAFANA_ADMIN_PASSWORD:-}"
-if [ -z "${GRAFANA_ADMIN_PASSWORD_VAL}" ]; then
-    log_error "Missing required environment variable GRAFANA_ADMIN_PASSWORD for Grafana secret"
-    exit 1
+# ------------------------------------------------------------------
+# Ensure Grafana admin secret (idempotent, non-fatal if vars missing)
+# ------------------------------------------------------------------
+GRAFANA_SECRET="civicpulse-grafana-secret"
+GRAFANA_NS="civicpulse"
+
+if [ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
+  echo "[GITOPS] Ensuring secret '${GRAFANA_SECRET}' exists in namespace '${GRAFANA_NS}'..."
+  kubectl create secret generic "${GRAFANA_SECRET}" \
+    --namespace="${GRAFANA_NS}" \
+    --from-literal=admin-user="${GRAFANA_ADMIN_USER:-admin}" \
+    --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  echo "[GITOPS] ✅ ${GRAFANA_SECRET} ready in namespace '${GRAFANA_NS}'"
+else
+  echo "[GITOPS] ⚠️  GRAFANA_ADMIN_PASSWORD not set – skipping creation of ${GRAFANA_SECRET}"
+  echo "[GITOPS]     (Grafana will stay in CreateContainerConfigError until the secret is created)"
 fi
-kubectl create secret generic civicpulse-grafana-secret \
-    --namespace civicpulse \
-    --from-literal=admin-user="${GRAFANA_ADMIN_USER_VAL}" \
-    --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD_VAL}" \
-    --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
-log_ok "civicpulse-grafana-secret ready in namespace 'civicpulse'"
 
 # ── Retrieve and Log Pre-Patch Application Parameters ─────────────────────────
 log_info "Inspecting existing Argo CD Application spec parameters..."
