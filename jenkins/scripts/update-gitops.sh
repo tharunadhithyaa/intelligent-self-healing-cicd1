@@ -149,6 +149,19 @@ kubectl create secret generic civicpulse-secret \
     --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
 log_ok "civicpulse-secret ready in namespace 'civicpulse'"
 
+GRAFANA_ADMIN_USER_VAL="${GRAFANA_ADMIN_USER:-admin}"
+GRAFANA_ADMIN_PASSWORD_VAL="${GRAFANA_ADMIN_PASSWORD:-}"
+if [ -z "${GRAFANA_ADMIN_PASSWORD_VAL}" ]; then
+    log_error "Missing required environment variable GRAFANA_ADMIN_PASSWORD for Grafana secret"
+    exit 1
+fi
+kubectl create secret generic civicpulse-grafana-secret \
+    --namespace civicpulse \
+    --from-literal=admin-user="${GRAFANA_ADMIN_USER_VAL}" \
+    --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD_VAL}" \
+    --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
+log_ok "civicpulse-grafana-secret ready in namespace 'civicpulse'"
+
 # ── Retrieve and Log Pre-Patch Application Parameters ─────────────────────────
 log_info "Inspecting existing Argo CD Application spec parameters..."
 PREV_PARAMS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.source.helm.parameters}' --request-timeout=10s 2>/dev/null || echo "[]")
