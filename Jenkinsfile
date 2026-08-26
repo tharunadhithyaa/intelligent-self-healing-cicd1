@@ -655,10 +655,14 @@ ENVEOF
 
                     echo "🔍 Executing SonarQube analysis using system-installed sonar-scanner CLI..."
 
-                    // Execute SonarQube analysis against configured server ('SonarQube') using system PATH
+                    // Execute SonarQube analysis against configured server ('SonarQube') with memory limits
                     withSonarQubeEnv('SonarQube') {
                         // Export SONAR_TOKEN for SonarScanner CLI and SonarQube 10.x environment inheritance
                         env.SONAR_TOKEN = env.SONAR_TOKEN ?: env.SONAR_AUTH_TOKEN
+                        // Prevent Node.js & JVM memory spikes from causing WSL2 agent disconnections
+                        env.SONAR_SCANNER_OPTS = "-Xmx1536m -XX:+UseG1GC"
+                        env.NODE_OPTIONS = "--max-old-space-size=2048"
+
                         if (isUnix()) {
                             // Execution on Linux / Unix agents
                             sh '/opt/sonar-scanner/bin/sonar-scanner'
