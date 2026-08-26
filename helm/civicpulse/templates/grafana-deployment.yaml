@@ -8,6 +8,7 @@ metadata:
   labels:
     {{- include "civicpulse.labels" . | nindent 4 }}
     app.kubernetes.io/component: grafana
+    app.kubernetes.io/part-of: civicpulse-monitoring
 spec:
   accessModes:
     - ReadWriteOnce
@@ -40,6 +41,10 @@ spec:
         app.kubernetes.io/component: grafana
         app.kubernetes.io/part-of: civicpulse-monitoring
     spec:
+      securityContext:
+        runAsUser: 472
+        fsGroup: 472
+        runAsNonRoot: true
       containers:
         - name: grafana
           image: "{{ .Values.monitoring.grafana.image.repository }}:{{ .Values.monitoring.grafana.image.tag }}"
@@ -77,14 +82,14 @@ spec:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
             timeoutSeconds: 5
       volumes:
