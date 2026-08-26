@@ -22,6 +22,11 @@ log_ok()    { echo -e "${GREEN}[GITOPS]${NC} ✅ $*"; }
 log_warn()  { echo -e "${YELLOW}[GITOPS]${NC} ⚠️  $*"; }
 log_error() { echo -e "${RED}[GITOPS]${NC} ❌ $*"; }
 
+# ── Early Debug Echoes ────────────────────────────────────────────────────────
+echo "[GITOPS] Script started"
+echo "[GITOPS] BUILD_NUMBER=${BUILD_NUMBER:-not set}"
+echo "[GITOPS] KUBECONFIG=${KUBECONFIG:-not set}"
+
 # ── Defaults & Configuration ──────────────────────────────────────────────────
 BUILD_NUMBER="${BUILD_NUMBER:-}"
 DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-300}"

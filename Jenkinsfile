@@ -1254,13 +1254,9 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                     echo "[GITOPS] Expected Frontend image: ghcr.io/tharunadhithyaa/civicpulse-frontend:${env.BUILD_NUMBER}"
 
                     withCredentials([
-                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN'),
-                        usernamePassword(credentialsId: 'grafana-credentials', usernameVariable: 'GRAFANA_ADMIN_USER', passwordVariable: 'GRAFANA_ADMIN_PASSWORD')
+                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
                     ]) {
-                        sh """
-                            ./jenkins/scripts/update-gitops.sh \
-                                --build-number "${env.BUILD_NUMBER}"
-                        """
+                        sh './jenkins/scripts/update-gitops.sh --build-number ${BUILD_NUMBER}'
                     }
 
 
