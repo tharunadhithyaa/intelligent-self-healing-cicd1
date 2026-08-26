@@ -162,11 +162,13 @@ log_ok "civicpulse-secret ready in namespace 'civicpulse'"
 
 GRAFANA_SECRET="civicpulse-grafana-secret"
 GRAFANA_NS="civicpulse"
+GRAFANA_USER_VAL="${GRAFANA_ADMIN_USER:-admin}"
+GRAFANA_PASS_VAL="${GRAFANA_ADMIN_PASSWORD:-CivicPulse@Grafana2026}"
 log_info "Ensuring secret '${GRAFANA_SECRET}' exists in namespace '${GRAFANA_NS}'..."
 kubectl create secret generic "${GRAFANA_SECRET}" \
     --namespace="${GRAFANA_NS}" \
-    --from-literal=admin-user="${GRAFANA_ADMIN_USER:-admin}" \
-    --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD}" \
+    --from-literal=admin-user="${GRAFANA_USER_VAL}" \
+    --from-literal=admin-password="${GRAFANA_PASS_VAL}" \
     --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
 log_ok "${GRAFANA_SECRET} ready in namespace '${GRAFANA_NS}'"
 

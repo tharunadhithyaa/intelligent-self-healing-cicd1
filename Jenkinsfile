@@ -92,6 +92,10 @@ pipeline {
         HTTP2_DISABLE       = 'true'
         GODEBUG             = 'http2client=0'
         DISABLE_HTTP2       = 'true'
+
+        // Grafana integration settings
+        GRAFANA_ADMIN_USER     = 'admin'
+        GRAFANA_ADMIN_PASSWORD = 'CivicPulse@Grafana2026'
     }
 
     stages {

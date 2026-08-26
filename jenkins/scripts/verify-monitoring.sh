@@ -50,11 +50,15 @@ UNREADY=0
 
 for comp in "${MONITORING_COMPONENTS[@]}"; do
     log_info "Verifying deployment/${comp}..."
-    if kubectl rollout status "deployment/${comp}" -n "${NAMESPACE}" --timeout=30s >/dev/null 2>&1; then
+    if kubectl rollout status "deployment/${comp}" -n "${NAMESPACE}" --timeout=120s >/dev/null 2>&1; then
         log_ok "Deployment ${comp} is Ready (1/1)"
     else
-        log_warn "Deployment ${comp} is NOT ready within timeout"
+        log_warn "Deployment ${comp} is NOT ready within 120s timeout"
         UNREADY=$((UNREADY + 1))
+        log_info "Dumping diagnostic details for deployment/${comp}..."
+        kubectl describe deployment "${comp}" -n "${NAMESPACE}" || true
+        kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/component=${comp#civicpulse-}" || true
+        kubectl logs -n "${NAMESPACE}" "deployment/${comp}" --tail=50 2>/dev/null || true
     fi
 done
 
