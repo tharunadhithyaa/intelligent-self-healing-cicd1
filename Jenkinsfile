@@ -955,14 +955,15 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
 
                                 push_with_retry() {
                                     local img="\$1"
-                                    local max_attempts=3
+                                    local max_attempts=5
                                     local attempt=1
-                                    local delay=10
+                                    local delay=15
 
-                                    local transient_regex="timeout|timed out|awaiting response headers|connection reset|connection refused|EOF|temporary failure|TLS handshake timeout|network is unreachable|i/o timeout|502|503|504|429"
+                                    local transient_regex="timeout|timed out|awaiting response headers|connection reset|connection refused|EOF|temporary failure|TLS handshake timeout|network is unreachable|i/o timeout|broken pipe|502|503|504|429"
                                     local auth_regex="unauthorized|authentication required|denied|permission denied|access denied|invalid credentials|repository does not exist|repository not found|\\\\b403\\\\b|\\\\b401\\\\b"
 
                                     while [ \$attempt -le \$max_attempts ]; do
+                                        curl -sI --max-time 10 https://ghcr.io/v2/ >/dev/null 2>&1 || true
                                         echo "🚀 Pushing \${img} (Attempt \${attempt}/\${max_attempts})..."
                                         local output
                                         set +e
@@ -1015,7 +1016,12 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                         if [ \$attempt -lt \$max_attempts ]; then
                                             echo "🔄 Retrying after \${delay}s..."
                                             sleep \$delay
-                                            delay=\$((delay * 2))
+                                            case \$attempt in
+                                                1) delay=30 ;;
+                                                2) delay=60 ;;
+                                                3) delay=90 ;;
+                                                *) delay=90 ;;
+                                            esac
                                         fi
                                         attempt=\$((attempt + 1))
                                     done
@@ -1059,12 +1065,13 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo 🚀 Pushing container images to GHCR...
                                 powershell -NoProfile -ExecutionPolicy Bypass -Command "^
                                     function Push-WithRetry([string]\$img) { ^
-                                        \$maxAttempts = 3; ^
+                                        \$maxAttempts = 5; ^
                                         \$attempt = 1; ^
-                                        \$delay = 10; ^
-                                        \$transientRegex = '(?i)(timeout|timed out|awaiting response headers|connection reset|connection refused|EOF|temporary failure|TLS handshake timeout|network is unreachable|i/o timeout|502|503|504|429)'; ^
+                                        \$delay = 15; ^
+                                        \$transientRegex = '(?i)(timeout|timed out|awaiting response headers|connection reset|connection refused|EOF|temporary failure|TLS handshake timeout|network is unreachable|i/o timeout|broken pipe|502|503|504|429)'; ^
                                         \$authRegex = '(?i)(unauthorized|authentication required|denied|permission denied|access denied|invalid credentials|repository does not exist|repository not found|\b403\b|\b401\b)'; ^
                                         while (\$attempt -le \$maxAttempts) { ^
+                                            try { curl.exe -sI --max-time 10 https://ghcr.io/v2/ | Out-Null } catch {}; ^
                                             Write-Host \"🚀 Pushing \$img (Attempt \$attempt/\$maxAttempts)...\"; ^
                                             \$output = docker push \$img 2>&1 | Out-String; ^
                                             if (\$LASTEXITCODE -eq 0) { ^
@@ -1103,7 +1110,12 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                             if (\$attempt -lt \$maxAttempts) { ^
                                                 Write-Host \"🔄 Retrying after \$delay s...\"; ^
                                                 Start-Sleep -Seconds \$delay; ^
-                                                \$delay = \$delay * 2; ^
+                                                switch (\$attempt) { ^
+                                                    1 { \$delay = 30 } ^
+                                                    2 { \$delay = 60 } ^
+                                                    3 { \$delay = 90 } ^
+                                                    default { \$delay = 90 } ^
+                                                }; ^
                                             } ^
                                             \$attempt++; ^
                                         } ^
