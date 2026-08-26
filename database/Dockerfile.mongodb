@@ -3,7 +3,8 @@ FROM golang:1.26-alpine AS gosu-builder
 
 ENV CGO_ENABLED=0
 
-RUN apk add --no-cache git && \
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache git && \
     git clone https://github.com/tianon/gosu.git /go/src/github.com/tianon/gosu && \
     cd /go/src/github.com/tianon/gosu && \
     go get -u golang.org/x/sys golang.org/x/net && \

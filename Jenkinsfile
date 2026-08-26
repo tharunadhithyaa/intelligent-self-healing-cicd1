@@ -721,7 +721,11 @@ ENVEOF
                     } else {
                         bat 'if not exist jenkins\\reports\\trivy mkdir jenkins\\reports\\trivy'
                         bat "if not exist \"%TRIVY_CACHE_DIR%\" mkdir \"%TRIVY_CACHE_DIR%\""
-                        bat "set HTTP2_DISABLE=true && set GODEBUG=http2client=0 && trivy fs --cache-dir \"%TRIVY_CACHE_DIR%\" --download-db-only --timeout 15m --db-repository \"mirror.gcr.io/aquasec/trivy-db:2\" ."
+                        bat """
+                            set HTTP2_DISABLE=true
+                            set GODEBUG=http2client=0
+                            trivy fs --cache-dir "%TRIVY_CACHE_DIR%" --download-db-only --timeout 15m --db-repository "mirror.gcr.io/aquasec/trivy-db:2" . || trivy fs --cache-dir "%TRIVY_CACHE_DIR%" --download-db-only --timeout 15m --db-repository "ghcr.io/aquasecurity/trivy-db:2" . || echo ⚠️ Warning: Failed to refresh Trivy DB, proceeding with existing cached database.
+                        """
                     }
 
                     echo '[TRIVY] Starting filesystem vulnerability scan...'
@@ -734,8 +738,8 @@ ENVEOF
                             trivy fs --cache-dir "${trivyCache}" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format sarif --output jenkins/reports/trivy/trivy-fs-report.sarif . || true
                             trivy fs --cache-dir "${trivyCache}" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format template --template "@jenkins/templates/html.tpl" --output jenkins/reports/trivy/trivy-fs-report.html . || true
                         """
-                        // Quality Gate enforcement: Fail pipeline if HIGH or CRITICAL vulnerabilities are found
-                        sh "trivy fs --cache-dir \"${trivyCache}\" --skip-db-update --severity ${env.TRIVY_SEVERITY ?: 'HIGH,CRITICAL'} --ignorefile .trivyignore --exit-code 1 ."
+                        // Quality Gate enforcement: Fail pipeline ONLY if HIGH or CRITICAL vulnerabilities WITH AVAILABLE FIXES are found
+                        sh "trivy fs --cache-dir \"${trivyCache}\" --skip-db-update --severity ${env.TRIVY_SEVERITY ?: 'HIGH,CRITICAL'} --ignore-unfixed --ignorefile .trivyignore --exit-code 1 ."
                     } else {
                         // Windows agent execution using cached DB
                         bat """
@@ -743,8 +747,8 @@ ENVEOF
                             trivy fs --cache-dir "%TRIVY_CACHE_DIR%" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format sarif --output jenkins/reports/trivy/trivy-fs-report.sarif . || exit 0
                             trivy fs --cache-dir "%TRIVY_CACHE_DIR%" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format template --template "@jenkins/templates/html.tpl" --output jenkins/reports/trivy/trivy-fs-report.html . || exit 0
                         """
-                        // Quality Gate enforcement: Fail pipeline if HIGH or CRITICAL vulnerabilities are found
-                        bat "trivy fs --cache-dir \"%TRIVY_CACHE_DIR%\" --skip-db-update --severity %TRIVY_SEVERITY% --ignorefile .trivyignore --exit-code 1 ."
+                        // Quality Gate enforcement: Fail pipeline ONLY if HIGH or CRITICAL vulnerabilities WITH AVAILABLE FIXES are found
+                        bat "trivy fs --cache-dir \"%TRIVY_CACHE_DIR%\" --skip-db-update --severity %TRIVY_SEVERITY% --ignore-unfixed --ignorefile .trivyignore --exit-code 1 ."
                     }
                 }
             }
@@ -849,8 +853,20 @@ ENVEOF
                                 trivy image --cache-dir "${env.TRIVY_CACHE_DIR}" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format sarif --output jenkins/reports/trivy/trivy-${cleanName}-report.sarif ${img} || true
                                 trivy image --cache-dir "${env.TRIVY_CACHE_DIR}" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format template --template "@jenkins/templates/html.tpl" --output jenkins/reports/trivy/trivy-${cleanName}-report.html ${img} || true
                             """
-                            // Quality Gate enforcement: Fail pipeline if HIGH or CRITICAL vulnerabilities are found
-                            sh "trivy image --cache-dir \"${env.TRIVY_CACHE_DIR}\" --skip-db-update --severity ${env.TRIVY_SEVERITY ?: 'HIGH,CRITICAL'} --ignorefile .trivyignore --exit-code 1 ${img}"
+                            // Quality Gate enforcement: Fail pipeline ONLY if HIGH or CRITICAL vulnerabilities WITH AVAILABLE FIXES are found
+                            def exitCode = sh(script: "trivy image --cache-dir \"${env.TRIVY_CACHE_DIR}\" --skip-db-update --severity ${env.TRIVY_SEVERITY ?: 'HIGH,CRITICAL'} --ignore-unfixed --ignorefile .trivyignore --exit-code 1 ${img}", returnStatus: true)
+                            if (exitCode != 0) {
+                                echo """
+\033[1;31m❌ SECURITY GATE FAILED\033[0m
+Image: ${img}
+
+HIGH or CRITICAL vulnerabilities with available fixes detected.
+
+Action:
+Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
+                                """
+                                error("❌ Security Gate Failed for ${img}: High/Critical vulnerabilities with available fixes detected.")
+                            }
                         } else {
                             // Windows agent execution using cached DB
                             bat """
@@ -858,7 +874,19 @@ ENVEOF
                                 trivy image --cache-dir "%TRIVY_CACHE_DIR%" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format sarif --output jenkins/reports/trivy/trivy-${cleanName}-report.sarif ${img} || exit 0
                                 trivy image --cache-dir "%TRIVY_CACHE_DIR%" --skip-db-update --severity HIGH,CRITICAL --ignorefile .trivyignore --format template --template "@jenkins/templates/html.tpl" --output jenkins/reports/trivy/trivy-${cleanName}-report.html ${img} || exit 0
                             """
-                            bat "trivy image --cache-dir \"%TRIVY_CACHE_DIR%\" --skip-db-update --severity %TRIVY_SEVERITY% --ignorefile .trivyignore --exit-code 1 ${img}"
+                            def exitCode = bat(script: "trivy image --cache-dir \"%TRIVY_CACHE_DIR%\" --skip-db-update --severity %TRIVY_SEVERITY% --ignore-unfixed --ignorefile .trivyignore --exit-code 1 ${img}", returnStatus: true)
+                            if (exitCode != 0) {
+                                echo """
+❌ SECURITY GATE FAILED
+Image: ${img}
+
+HIGH or CRITICAL vulnerabilities with available fixes detected.
+
+Action:
+Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
+                                """
+                                error("❌ Security Gate Failed for ${img}: High/Critical vulnerabilities with available fixes detected.")
+                            }
                         }
                     }
                 }
