@@ -48,6 +48,12 @@ if [ -z "${BUILD_NUMBER}" ] || ! [[ "${BUILD_NUMBER}" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+if [ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
+    log_error "FATAL: GRAFANA_ADMIN_PASSWORD environment variable is missing."
+    log_error "Ensure Jenkins credential 'grafana-admin-password' (Secret text) is bound in Jenkinsfile."
+    exit 1
+fi
+
 cd "${REPO_ROOT}"
 
 EXPECTED_BACKEND="ghcr.io/tharunadhithyaa/civicpulse-backend:${BUILD_NUMBER}"
@@ -154,24 +160,15 @@ kubectl create secret generic civicpulse-secret \
     --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
 log_ok "civicpulse-secret ready in namespace 'civicpulse'"
 
-# ------------------------------------------------------------------
-# Ensure Grafana admin secret (idempotent, non-fatal if vars missing)
-# ------------------------------------------------------------------
 GRAFANA_SECRET="civicpulse-grafana-secret"
 GRAFANA_NS="civicpulse"
-
-if [ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
-  echo "[GITOPS] Ensuring secret '${GRAFANA_SECRET}' exists in namespace '${GRAFANA_NS}'..."
-  kubectl create secret generic "${GRAFANA_SECRET}" \
+log_info "Ensuring secret '${GRAFANA_SECRET}' exists in namespace '${GRAFANA_NS}'..."
+kubectl create secret generic "${GRAFANA_SECRET}" \
     --namespace="${GRAFANA_NS}" \
     --from-literal=admin-user="${GRAFANA_ADMIN_USER:-admin}" \
     --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD}" \
-    --dry-run=client -o yaml | kubectl apply -f -
-  echo "[GITOPS] ✅ ${GRAFANA_SECRET} ready in namespace '${GRAFANA_NS}'"
-else
-  echo "[GITOPS] ⚠️  GRAFANA_ADMIN_PASSWORD not set – skipping creation of ${GRAFANA_SECRET}"
-  echo "[GITOPS]     (Grafana will stay in CreateContainerConfigError until the secret is created)"
-fi
+    --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
+log_ok "${GRAFANA_SECRET} ready in namespace '${GRAFANA_NS}'"
 
 # ── Retrieve and Log Pre-Patch Application Parameters ─────────────────────────
 log_info "Inspecting existing Argo CD Application spec parameters..."
@@ -240,23 +237,33 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
 
     log_info "[GITOPS] Desired: :${BUILD_NUMBER} | Live Backend Spec: ${BACKEND_LIVE_IMG} | Live Frontend Spec: ${FRONTEND_LIVE_IMG} (${ELAPSED}s/${DEPLOYMENT_TIMEOUT}s)"
 
-    # Inspect pod status for fast failure detection
-    POD_ERRORS=$(kubectl get pods -n civicpulse --no-headers --request-timeout=10s 2>/dev/null | grep -E "ImagePullBackOff|ErrImagePull|CrashLoopBackOff|CreateContainerConfigError|CreateContainerError" || true)
+    # Inspect pod status for fast failure detection on target deployment components (backend & frontend)
+    TARGET_POD_ERRORS=$(kubectl get pods -n civicpulse -l 'app.kubernetes.io/component in (backend, frontend)' --no-headers --request-timeout=10s 2>/dev/null | grep -E "ImagePullBackOff|ErrImagePull|CrashLoopBackOff|CreateContainerConfigError|CreateContainerError" || true)
 
-    if [ -n "${POD_ERRORS}" ]; then
-        log_error "Detected container failure state in Kubernetes pods:"
-        echo "${POD_ERRORS}"
-        if echo "${POD_ERRORS}" | grep -qE "ImagePullBackOff|ErrImagePull"; then
+    if [ -n "${TARGET_POD_ERRORS}" ]; then
+        log_error "Detected container failure state in target deployment pods (backend/frontend):"
+        echo "${TARGET_POD_ERRORS}"
+        if echo "${TARGET_POD_ERRORS}" | grep -qE "ImagePullBackOff|ErrImagePull"; then
             log_error "❌ Image pull failure detected. Check image existence in GHCR and ghcr-secret credentials."
         fi
-        if echo "${POD_ERRORS}" | grep -qE "CreateContainerConfigError|CreateContainerError"; then
-            log_error "❌ Container configuration error detected. Dumping pod details..."
-            kubectl describe pods -n civicpulse -l app.kubernetes.io/component=grafana 2>/dev/null || true
+        if echo "${TARGET_POD_ERRORS}" | grep -qE "CreateContainerConfigError|CreateContainerError"; then
+            log_error "❌ Container configuration error detected on deployment pods."
         fi
-        if echo "${POD_ERRORS}" | grep -q "CrashLoopBackOff"; then
+        if echo "${TARGET_POD_ERRORS}" | grep -q "CrashLoopBackOff"; then
             log_error "❌ Container crash detected during startup. Inspecting container logs..."
         fi
         break
+    fi
+
+    # Non-blocking diagnostic inspection for other namespace pods (e.g. Grafana, Prometheus)
+    OTHER_POD_ERRORS=$(kubectl get pods -n civicpulse --no-headers --request-timeout=10s 2>/dev/null | grep -v -E "civicpulse-backend|civicpulse-frontend" | grep -E "ImagePullBackOff|ErrImagePull|CrashLoopBackOff|CreateContainerConfigError|CreateContainerError" || true)
+    if [ -n "${OTHER_POD_ERRORS}" ]; then
+        log_warn "Detected container issue in non-target pod (advisory only, deployment continuing):"
+        echo "${OTHER_POD_ERRORS}"
+        if echo "${OTHER_POD_ERRORS}" | grep -qE "CreateContainerConfigError|CreateContainerError"; then
+            log_warn "Dumping pod details for non-target pod diagnostic review..."
+            kubectl describe pods -n civicpulse -l app.kubernetes.io/component=grafana 2>/dev/null || true
+        fi
     fi
 
     # CRITICAL RACE-CONDITION PREVENTION:
