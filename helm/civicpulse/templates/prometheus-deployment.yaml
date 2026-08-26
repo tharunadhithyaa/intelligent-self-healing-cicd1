@@ -1,0 +1,196 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civicpulse-prometheus-config
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "civicpulse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      scrape_timeout: 10s
+
+    rule_files:
+      - /etc/prometheus/alert_rules.yml
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['civicpulse-alertmanager:9093']
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'civicpulse-backend'
+        metrics_path: '/api/health'
+        scrape_interval: 10s
+        static_configs:
+          - targets: ['civicpulse-backend:3000']
+
+      - job_name: 'civicpulse-nginx'
+        metrics_path: '/stub_status'
+        scrape_interval: 10s
+        static_configs:
+          - targets: ['civicpulse-nginx:80']
+
+      - job_name: 'civicpulse-mongodb'
+        scrape_interval: 15s
+        static_configs:
+          - targets: ['civicpulse-mongodb:27017']
+
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [ {{ .Values.namespace | default .Release.Namespace | quote }} ]
+
+  alert_rules.yml: |
+    groups:
+      - name: civicpulse_alerts
+        rules:
+          - alert: PodCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total[5m]) * 60 > 2
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ "{{" }} $labels.pod {{ "}}" }} is in a restart loop"
+              description: "Pod {{ "{{" }} $labels.pod {{ "}}" }} has restarted more than 2 times in 5 minutes."
+
+          - alert: BackendHealthFailing
+            expr: probe_success{job="civicpulse-backend"} == 0
+            for: 30s
+            labels:
+              severity: critical
+            annotations:
+              summary: "Backend API /api/health endpoint failing"
+              description: "CivicPulse backend service health probe failed."
+
+          - alert: HighCpuUsage
+            expr: rate(container_cpu_usage_seconds_total[5m]) > 0.8
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage on pod {{ "{{" }} $labels.pod {{ "}}" }}"
+              description: "Container CPU usage has exceeded 80% for 2 minutes."
+
+          - alert: HighMemoryUsage
+            expr: container_memory_working_set_bytes > 419430400
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High Memory usage on container {{ "{{" }} $labels.container {{ "}}" }}"
+              description: "Container memory footprint exceeded 400MB."
+
+          - alert: MongoDBDown
+            expr: up{job="civicpulse-mongodb"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "MongoDB Database Instance Down"
+              description: "StatefulSet civicpulse-mongodb target unreachable."
+
+          - alert: DiskPressureWarning
+            expr: kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Storage PVC volume {{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} almost full"
+              description: "Volume usage exceeded 85% capacity."
+---
+{{- if .Values.monitoring.prometheus.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "civicpulse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.monitoring.prometheus.persistence.size | default "1Gi" }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: civicpulse-prometheus
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "civicpulse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+    app.kubernetes.io/part-of: civicpulse-monitoring
+spec:
+  replicas: {{ .Values.monitoring.prometheus.replicaCount | default 1 }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "civicpulse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        {{- include "civicpulse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: prometheus
+        app.kubernetes.io/part-of: civicpulse-monitoring
+    spec:
+      containers:
+        - name: prometheus
+          image: "{{ .Values.monitoring.prometheus.image.repository }}:{{ .Values.monitoring.prometheus.image.tag }}"
+          imagePullPolicy: {{ .Values.monitoring.prometheus.image.pullPolicy }}
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time={{ .Values.monitoring.prometheus.retention | default "15d" }}"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+              name: http
+          resources:
+            {{- toYaml .Values.monitoring.prometheus.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: civicpulse-prometheus-config
+        - name: storage
+          {{- if .Values.monitoring.prometheus.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: prometheus-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

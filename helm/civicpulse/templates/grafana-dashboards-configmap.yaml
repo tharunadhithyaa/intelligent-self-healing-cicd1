@@ -1,0 +1,143 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civicpulse-grafana-datasources
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "civicpulse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://civicpulse-prometheus:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civicpulse-grafana-dashboards-providers
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "civicpulse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'CivicPulse Dashboards'
+        orgId: 1
+        folder: 'CivicPulseAI'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civicpulse-grafana-dashboards
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "civicpulse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  cluster-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": 1,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "CPU Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "rate(container_cpu_usage_seconds_total[5m])", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }
+          ]
+        },
+        {
+          "title": "Memory Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "container_memory_working_set_bytes", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }
+          ]
+        }
+      ],
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["civicpulse", "k3s"],
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "1. CivicPulse — Cluster Overview"
+    }
+  application-pods.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "id": 2,
+      "panels": [
+        {
+          "title": "Pod Restarts",
+          "type": "stat",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "sum(kube_pod_container_status_restarts_total) by (pod)", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }
+          ]
+        },
+        {
+          "title": "Backend API Health Probe (/api/health)",
+          "type": "stat",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "probe_success{job=\"civicpulse-backend\"}", "legendFormat": "Backend Health" }
+          ]
+        }
+      ],
+      "title": "2. CivicPulse — Application Pods & Health"
+    }
+  mongodb-health.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "id": 3,
+      "panels": [
+        {
+          "title": "MongoDB Status",
+          "type": "stat",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "up{job=\"civicpulse-mongodb\"}", "legendFormat": "MongoDB Up" }
+          ]
+        }
+      ],
+      "title": "3. CivicPulse — MongoDB Health"
+    }
+  nginx-traffic.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "id": 4,
+      "panels": [
+        {
+          "title": "Nginx Active Connections",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "nginx_stat_requests", "legendFormat": "Requests" }
+          ]
+        }
+      ],
+      "title": "4. CivicPulse — Nginx Traffic"
+    }
+{{- end }}

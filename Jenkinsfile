@@ -1295,6 +1295,44 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
         }
 
         // ══════════════════════════════════════════════════════════════════════
+        // STAGE 12.5 — Deploy & Verify Monitoring Stack (Prometheus/Grafana/Alertmanager)
+        // ══════════════════════════════════════════════════════════════════════
+        stage('Deploy & Verify Monitoring Stack') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 12.5 — Deploy & Verify Monitoring Stack\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                script {
+                    echo "📊 Verifying Prometheus + Grafana + Alertmanager Monitoring Stack..."
+                    sh 'chmod +x jenkins/scripts/verify-monitoring.sh'
+                    sh """
+                        ./jenkins/scripts/verify-monitoring.sh
+                    """
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // STAGE 12.6 — Verify Prometheus Targets & Grafana Accessibility
+        // ══════════════════════════════════════════════════════════════════════
+        stage('Verify Prometheus Targets & Grafana') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 12.6 — Verify Prometheus Targets & Grafana Accessibility\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                script {
+                    echo "🌐 Checking Grafana Web UI at ${env.APP_URL}grafana/login..."
+                    echo "   • URL: ${env.APP_URL}grafana/"
+                    echo "   • User: admin"
+                    echo "   • Password: CivicPulse@Grafana2026"
+                    echo "   • Default Datasource: Prometheus (http://civicpulse-prometheus:9090)"
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
         // STAGE 13 — Deployment Report
         // ══════════════════════════════════════════════════════════════════════
         stage('Deployment Report') {
@@ -1315,6 +1353,24 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
 
                 // Archive the deployment report
                 archiveArtifacts artifacts: 'jenkins/reports/**/*', fingerprint: true, allowEmptyArchive: true
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // STAGE 13.5 — Archive Monitoring Report
+        // ══════════════════════════════════════════════════════════════════════
+        stage('Archive Monitoring Report') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 13.5 — Archive Monitoring Report\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                sh 'chmod +x jenkins/scripts/generate-monitoring-report.sh'
+                sh """
+                    ./jenkins/scripts/generate-monitoring-report.sh
+                """
+                archiveArtifacts artifacts: 'jenkins/reports/monitoring/**/*', fingerprint: true, allowEmptyArchive: true
+                echo '📦 Monitoring report archived'
             }
         }
     }
