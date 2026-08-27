@@ -946,6 +946,11 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                             sh """
                                 set -e
                                 set +x
+                                DOCKER_CONFIG_DIR=\$(mktemp -d "\${WORKSPACE}/.docker-ci-XXXXXX")
+                                export DOCKER_CONFIG="\${DOCKER_CONFIG_DIR}"
+                                echo '{"auths":{}}' > "\${DOCKER_CONFIG}/config.json"
+                                trap 'rm -rf "\${DOCKER_CONFIG_DIR}"' EXIT
+
                                 echo "🔐 Logging in to GitHub Container Registry (${env.GHCR_REGISTRY})..."
                                 echo "\${GHCR_TOKEN}" | docker login "${env.GHCR_REGISTRY}" -u "\${GHCR_USERNAME}" --password-stdin
                                 echo "  ✅ Logged in to GHCR successfully"
@@ -1173,6 +1178,11 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                             sh """
                                 set -e
                                 set +x
+                                DOCKER_CONFIG_DIR=\$(mktemp -d "\${WORKSPACE}/.docker-ci-XXXXXX")
+                                export DOCKER_CONFIG="\${DOCKER_CONFIG_DIR}"
+                                echo '{"auths":{}}' > "\${DOCKER_CONFIG}/config.json"
+                                trap 'rm -rf "\${DOCKER_CONFIG_DIR}"' EXIT
+
                                 echo "🔐 Authenticating with GHCR before inspecting image manifests..."
                                 echo "\${GHCR_TOKEN}" | docker login "${env.GHCR_REGISTRY}" -u "\${GHCR_USERNAME}" --password-stdin
                                 echo "  ✅ GHCR authentication successful"
