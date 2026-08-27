@@ -48,6 +48,8 @@ log_info "Checking monitoring pod deployment rollout status..."
 MONITORING_COMPONENTS=("civicpulse-prometheus" "civicpulse-grafana" "civicpulse-alertmanager")
 UNREADY=0
 
+HAS_WARNINGS=0
+
 for comp in "${MONITORING_COMPONENTS[@]}"; do
     log_info "Verifying deployment/${comp}..."
     if kubectl rollout status "deployment/${comp}" -n "${NAMESPACE}" --timeout=120s >/dev/null 2>&1; then
@@ -55,6 +57,7 @@ for comp in "${MONITORING_COMPONENTS[@]}"; do
     else
         log_warn "Deployment ${comp} is NOT ready within 120s timeout"
         UNREADY=$((UNREADY + 1))
+        HAS_WARNINGS=1
         log_info "Dumping diagnostic details for deployment/${comp}..."
         kubectl describe deployment "${comp}" -n "${NAMESPACE}" || true
         kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/component=${comp#civicpulse-}" || true
@@ -83,6 +86,7 @@ if [ -n "${PROM_POD}" ]; then
         log_ok "Prometheus API /-/healthy — OK"
     else
         log_warn "Prometheus API /-/healthy response: ${PROM_HEALTH}"
+        HAS_WARNINGS=1
     fi
 
     # Query active scrape targets
@@ -92,6 +96,7 @@ if [ -n "${PROM_POD}" ]; then
     log_ok "Prometheus active 'up' targets count: ${ACTIVE_COUNT}"
 else
     log_warn "No running Prometheus pod found for target inspection"
+    HAS_WARNINGS=1
 fi
 
 # ── 3. Verify Grafana Web Accessibility via Proxy Route (/grafana/login) ──────
@@ -103,6 +108,7 @@ if [ "${GRAFANA_HTTP_CODE}" = "200" ]; then
     log_ok "Grafana Web Interface — Accessible at ${APP_URL}/grafana/ (HTTP 200 OK)"
 else
     log_warn "Grafana Web Interface returned HTTP ${GRAFANA_HTTP_CODE} at ${APP_URL}/grafana/login"
+    HAS_WARNINGS=1
     # Fallback direct check via pod
     GRAFANA_POD=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=grafana --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
     if [ -n "${GRAFANA_POD}" ]; then
@@ -122,12 +128,20 @@ if [ -n "${ALERT_POD}" ]; then
     if echo "${ALERT_HEALTH}" | grep -q "OK" || [ -n "${ALERT_HEALTH}" ]; then
         log_ok "Alertmanager API /-/healthy — OK (via pod ${ALERT_POD})"
     fi
+else
+    HAS_WARNINGS=1
 fi
 
 echo ""
-log_ok "═══════════════════════════════════════════════════"
-log_ok "  Prometheus + Grafana + Alertmanager Stack Verified"
-log_ok "═══════════════════════════════════════════════════"
+if [ ${HAS_WARNINGS} -gt 0 ]; then
+    log_warn "═══════════════════════════════════════════════════"
+    log_warn "  Monitoring stack verification completed with warnings"
+    log_warn "═══════════════════════════════════════════════════"
+else
+    log_ok "═══════════════════════════════════════════════════"
+    log_ok "  Prometheus + Grafana + Alertmanager Stack Verified"
+    log_ok "═══════════════════════════════════════════════════"
+fi
 log_info "  Grafana URL      : ${APP_URL}/grafana/"
 log_info "  Grafana User     : admin"
 log_info "  Grafana Password : CivicPulse@Grafana2026"
