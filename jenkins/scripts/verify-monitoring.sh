@@ -63,7 +63,9 @@ for comp in "${MONITORING_COMPONENTS[@]}"; do
 done
 
 if [ ${UNREADY} -gt 0 ]; then
-    log_warn "${UNREADY} monitoring component(s) failed rollout verification (non-blocking warning)."
+    log_warn "WARNING: ${UNREADY} monitoring component(s) unhealthy during rollout verification."
+    log_warn "Monitoring verification is non-blocking."
+    log_warn "Core application health remains a hard gate."
     kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/part-of=civicpulse-monitoring || true
 fi
 
