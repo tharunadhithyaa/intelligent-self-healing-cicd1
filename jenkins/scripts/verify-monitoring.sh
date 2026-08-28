@@ -138,7 +138,7 @@ log_info "Verifying ML Decision Controller service health..."
 ML_POD=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=ml-decision-controller --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
 
 if [ -n "${ML_POD}" ]; then
-    ML_HEALTH=$(kubectl exec "${ML_POD}" -n "${NAMESPACE}" -- wget -qO- http://localhost:5000/health 2>/dev/null || echo "")
+    ML_HEALTH=$(kubectl exec "${ML_POD}" -n "${NAMESPACE}" -- python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:5000/health').read().decode())" 2>/dev/null || echo "")
     if echo "${ML_HEALTH}" | grep -q '"status":"healthy"' || echo "${ML_HEALTH}" | grep -q 'healthy'; then
         log_ok "ML Decision Controller API /health — OK (via pod ${ML_POD})"
     else

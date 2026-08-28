@@ -21,4 +21,4 @@ COPY mongo-init.js /docker-entrypoint-initdb.d/
 
 # Add basic health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD mongosh --quiet --eval "db.adminCommand('ping')" || exit 1
+  CMD mongosh --quiet --eval "db.adminCommand({ping: 1})" || exit 1

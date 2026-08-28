@@ -1403,7 +1403,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                             CONTROLLER_POD=$(kubectl get pods -n civicpulse -l app.kubernetes.io/component=ml-decision-controller --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
                             if [ -n "${CONTROLLER_POD}" ]; then
                                 echo "  ✅ Found running ML Decision Controller Pod: ${CONTROLLER_POD}"
-                                HEALTH_RESP=$(kubectl exec "${CONTROLLER_POD}" -n civicpulse -- wget -qO- http://localhost:5000/health 2>/dev/null || echo "")
+                                HEALTH_RESP=$(kubectl exec "${CONTROLLER_POD}" -n civicpulse -- python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:5000/health').read().decode())" 2>/dev/null || echo "")
                                 echo "  HEALTH: ${HEALTH_RESP}"
                             else
                                 echo "  ⚠️ ML Decision Controller pod not yet running or still starting"
