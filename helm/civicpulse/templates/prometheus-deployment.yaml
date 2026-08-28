@@ -33,6 +33,12 @@ data:
         static_configs:
           - targets: ['civicpulse-backend:3000']
 
+      - job_name: 'civicpulse-ml-decision-controller'
+        metrics_path: '/metrics'
+        scrape_interval: 15s
+        static_configs:
+          - targets: ['civicpulse-ml-decision-controller:5000']
+
       - job_name: 'kubernetes-cadvisor'
         scheme: https
         tls_config:

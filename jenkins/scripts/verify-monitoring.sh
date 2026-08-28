@@ -133,6 +133,23 @@ else
     HAS_WARNINGS=1
 fi
 
+# ── 5. Verify ML Decision Controller Health ──────────────────────────────────
+log_info "Verifying ML Decision Controller service health..."
+ML_POD=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=ml-decision-controller --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+
+if [ -n "${ML_POD}" ]; then
+    ML_HEALTH=$(kubectl exec "${ML_POD}" -n "${NAMESPACE}" -- wget -qO- http://localhost:5000/health 2>/dev/null || echo "")
+    if echo "${ML_HEALTH}" | grep -q '"status":"healthy"' || echo "${ML_HEALTH}" | grep -q 'healthy'; then
+        log_ok "ML Decision Controller API /health — OK (via pod ${ML_POD})"
+    else
+        log_warn "ML Decision Controller response: ${ML_HEALTH}"
+        HAS_WARNINGS=1
+    fi
+else
+    log_warn "ML Decision Controller pod not currently running or deployed"
+    HAS_WARNINGS=1
+fi
+
 echo ""
 if [ ${HAS_WARNINGS} -gt 0 ]; then
     log_warn "═══════════════════════════════════════════════════"

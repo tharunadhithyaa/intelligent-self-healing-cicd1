@@ -178,14 +178,15 @@ PREV_PARAMS=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.s
 log_info "Current spec parameters before patch: ${PREV_PARAMS}"
 
 # ── Patch Argo CD Application Parameters ──────────────────────────────────────
-log_info "Applying Argo CD Application parameter overrides for build '${BUILD_NUMBER}' (backend & frontend)..."
+log_info "Applying Argo CD Application parameter overrides for build '${BUILD_NUMBER}' (backend, frontend, mlDecisionController)..."
 if ! kubectl patch application civicpulse -n argocd --type merge --request-timeout=10s -p "{
   \"spec\": {
     \"source\": {
       \"helm\": {
         \"parameters\": [
           {\"name\": \"frontend.image.tag\", \"value\": \"${BUILD_NUMBER}\"},
-          {\"name\": \"backend.image.tag\", \"value\": \"${BUILD_NUMBER}\"}
+          {\"name\": \"backend.image.tag\", \"value\": \"${BUILD_NUMBER}\"},
+          {\"name\": \"mlDecisionController.image.tag\", \"value\": \"${BUILD_NUMBER}\"}
         ]
       }
     }

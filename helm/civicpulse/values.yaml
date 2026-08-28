@@ -175,3 +175,21 @@ monitoring:
     mlDecisionController:
       webhookUrl: "http://civicpulse-ml-decision-controller:5000/api/v1/alerts"
 
+mlDecisionController:
+  enabled: true
+  image:
+    repository: ghcr.io/tharunadhithyaa/civicpulse-ml-decision-controller
+    tag: "latest"
+    pullPolicy: Always
+  replicas: 1
+  service:
+    port: 5000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+

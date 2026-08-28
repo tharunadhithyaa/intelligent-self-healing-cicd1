@@ -860,7 +860,8 @@ ENVEOF
                         "${env.DOCKER_IMAGE_PREFIX}/backend:${currentTag}",
                         "${env.DOCKER_IMAGE_PREFIX}/frontend:${currentTag}",
                         "${env.DOCKER_IMAGE_PREFIX}/nginx:${currentTag}",
-                        "${env.DOCKER_IMAGE_PREFIX}/mongodb:${currentTag}"
+                        "${env.DOCKER_IMAGE_PREFIX}/mongodb:${currentTag}",
+                        "${env.DOCKER_IMAGE_PREFIX}/ml-decision-controller:${currentTag}"
                     ]
 
                     imagesToScan.each { img ->
@@ -936,11 +937,14 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                         def frontendLocal      = "${env.DOCKER_IMAGE_PREFIX}/frontend:${env.IMAGE_TAG}"
                         def nginxLocal         = "${env.DOCKER_IMAGE_PREFIX}/nginx:${env.IMAGE_TAG}"
                         def mongodbLocal       = "${env.DOCKER_IMAGE_PREFIX}/mongodb:${env.IMAGE_TAG}"
+                        def mlControllerLocal  = "${env.DOCKER_IMAGE_PREFIX}/ml-decision-controller:${env.IMAGE_TAG}"
 
                         def backendGhcrTag     = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-backend:${env.IMAGE_TAG}"
                         def frontendGhcrTag    = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-frontend:${env.IMAGE_TAG}"
                         def nginxGhcrLatest    = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest"
                         def mongodbGhcrLatest  = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest"
+                        def mlControllerGhcrTag = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-ml-decision-controller:${env.IMAGE_TAG}"
+                        def mlControllerGhcrLatest = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-ml-decision-controller:latest"
 
                         if (isUnix()) {
                             sh """
@@ -956,11 +960,13 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo "  ✅ Logged in to GHCR successfully"
 
                                 echo ""
-                                echo "🏷️ Tagging container images for GHCR (backend/frontend: ${env.IMAGE_TAG}, mongodb/nginx: latest)..."
+                                echo "🏷️ Tagging container images for GHCR (backend/frontend/mlController: ${env.IMAGE_TAG}, mongodb/nginx/mlController: latest)..."
                                 docker tag ${backendLocal} ${backendGhcrTag}
                                 docker tag ${frontendLocal} ${frontendGhcrTag}
                                 docker tag ${nginxLocal} ${nginxGhcrLatest}
                                 docker tag ${mongodbLocal} ${mongodbGhcrLatest}
+                                docker tag ${mlControllerLocal} ${mlControllerGhcrTag}
+                                docker tag ${mlControllerLocal} ${mlControllerGhcrLatest}
 
                                 push_with_retry() {
                                     local img="\$1"
@@ -1046,6 +1052,8 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 push_with_retry "${frontendGhcrTag}" || exit 1
                                 push_with_retry "${nginxGhcrLatest}" || exit 1
                                 push_with_retry "${mongodbGhcrLatest}" || exit 1
+                                push_with_retry "${mlControllerGhcrTag}" || exit 1
+                                push_with_retry "${mlControllerGhcrLatest}" || exit 1
 
                                 echo ""
                                 echo "✅ Successfully pushed container images to GHCR:"
@@ -1053,6 +1061,8 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo "   • ${frontendGhcrTag}"
                                 echo "   • ${nginxGhcrLatest}"
                                 echo "   • ${mongodbGhcrLatest}"
+                                echo "   • ${mlControllerGhcrTag}"
+                                echo "   • ${mlControllerGhcrLatest}"
                             """
                         } else {
                             bat """
@@ -1063,11 +1073,13 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo   ✅ Logged in to GHCR successfully
 
                                 echo.
-                                echo 🏷️ Tagging container images for GHCR (backend/frontend: ${env.IMAGE_TAG}, mongodb/nginx: latest)...
+                                echo 🏷️ Tagging container images for GHCR (backend/frontend/mlController: ${env.IMAGE_TAG}, mongodb/nginx/mlController: latest)...
                                 docker tag ${backendLocal} ${backendGhcrTag}
                                 docker tag ${frontendLocal} ${frontendGhcrTag}
                                 docker tag ${nginxLocal} ${nginxGhcrLatest}
                                 docker tag ${mongodbLocal} ${mongodbGhcrLatest}
+                                docker tag ${mlControllerLocal} ${mlControllerGhcrTag}
+                                docker tag ${mlControllerLocal} ${mlControllerGhcrLatest}
                                 if errorlevel 1 exit /b 1
 
                                 echo.
@@ -1132,7 +1144,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                         Write-Host \"Reason: transient GHCR/network timeout.\"; ^
                                         return \$false; ^
                                     }; ^
-                                    \$images = @('${backendGhcrTag}', '${frontendGhcrTag}', '${nginxGhcrLatest}', '${mongodbGhcrLatest}'); ^
+                                    \$images = @('${backendGhcrTag}', '${frontendGhcrTag}', '${nginxGhcrLatest}', '${mongodbGhcrLatest}', '${mlControllerGhcrTag}', '${mlControllerGhcrLatest}'); ^
                                     foreach (\$img in \$images) { ^
                                         if (-not (Push-WithRetry \$img)) { exit 1 } ^
                                     } ^
@@ -1145,6 +1157,8 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo    • ${frontendGhcrTag}
                                 echo    • ${nginxGhcrLatest}
                                 echo    • ${mongodbGhcrLatest}
+                                echo    • ${mlControllerGhcrTag}
+                                echo    • ${mlControllerGhcrLatest}
                             """
                         }
                     }
@@ -1369,6 +1383,35 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                     echo "   • User: admin"
                     echo "   • Password: CivicPulse@Grafana2026"
                     echo "   • Default Datasource: Prometheus (http://civicpulse-prometheus:9090)"
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // STAGE 12.7 — Verify ML Decision Controller
+        // ══════════════════════════════════════════════════════════════════════
+        stage('12.7 Verify ML Decision Controller') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 12.7 — Verify ML Decision Controller\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                script {
+                    try {
+                        echo "🤖 Verifying ML Decision Controller health and endpoint accessibility..."
+                        sh '''
+                            CONTROLLER_POD=$(kubectl get pods -n civicpulse -l app.kubernetes.io/component=ml-decision-controller --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+                            if [ -n "${CONTROLLER_POD}" ]; then
+                                echo "  ✅ Found running ML Decision Controller Pod: ${CONTROLLER_POD}"
+                                HEALTH_RESP=$(kubectl exec "${CONTROLLER_POD}" -n civicpulse -- wget -qO- http://localhost:5000/health 2>/dev/null || echo "")
+                                echo "  HEALTH: ${HEALTH_RESP}"
+                            else
+                                echo "  ⚠️ ML Decision Controller pod not yet running or still starting"
+                            fi
+                        '''
+                    } catch (Exception e) {
+                        echo "WARNING: ML Decision Controller verification failed (non-blocking): ${e}"
+                    }
                 }
             }
         }

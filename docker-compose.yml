@@ -96,6 +96,26 @@ services:
       retries: 3
       start_period: 5s
 
+  ml-decision-controller:
+    build:
+      context: ./ml-decision-controller
+      dockerfile: Dockerfile
+    image: civicpulse/ml-decision-controller:${IMAGE_TAG:-build}
+    container_name: civicpulse-ml-decision-controller
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    networks:
+      civicpulse-network:
+        aliases:
+          - civicpulse-ml-decision-controller
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   sonarqube:
     image: sonarqube:community
     container_name: sonarqube

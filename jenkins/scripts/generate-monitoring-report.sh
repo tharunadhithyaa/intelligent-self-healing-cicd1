@@ -33,7 +33,13 @@ cat > "${MD_REPORT}" <<EOF
 | **Prometheus Server** | ✅ Active | \`http://civicpulse-prometheus:9090\` | 9090 |
 | **Grafana Dashboards** | ✅ Active | [${APP_URL}/grafana/](${APP_URL}/grafana/) | 3000 / 30080 |
 | **Alertmanager** | ✅ Active | \`http://civicpulse-alertmanager:9093\` | 9093 |
-| **ML Decision Controller** | ⏳ Webhook Ready | \`http://civicpulse-ml-decision-controller:5000/api/v1/alerts\` | 5000 |
+| **ML Decision Controller** | ✅ Active / Webhook Listening | \`http://civicpulse-ml-decision-controller:5000/api/v1/alerts\` | 5000 |
+
+## Self-Healing Remediation Policy
+- **Restart**: Triggers `rollout restart` on Deployment/StatefulSet upon `PodCrashLooping`, `BackendHealthFailing`, or `MongoDBDown`.
+- **Scale**: Triggers `scale` (+1 replica, max 3) upon `HighCpuUsage` or `HighMemoryUsage`.
+- **Rollback**: Triggers zero-commit Argo CD Application parameter rollback to previous build tag upon critical multi-failures (cumulative score >= 20).
+- **Cooldown**: Enforces a 5-minute (300s) rate limit per workload to prevent thrashing.
 
 ## Grafana Access Credentials
 - **URL**: [${APP_URL}/grafana/](${APP_URL}/grafana/)
@@ -88,6 +94,7 @@ cat > "${HTML_REPORT}" <<EOF
             <tr><td>Prometheus</td><td><span class="badge-success">HEALTHY</span></td><td>civicpulse-prometheus:9090</td></tr>
             <tr><td>Grafana</td><td><span class="badge-success">HEALTHY</span></td><td>civicpulse-grafana:3000</td></tr>
             <tr><td>Alertmanager</td><td><span class="badge-success">HEALTHY</span></td><td>civicpulse-alertmanager:9093</td></tr>
+            <tr><td>ML Decision Controller</td><td><span class="badge-success">HEALTHY</span></td><td>civicpulse-ml-decision-controller:5000</td></tr>
         </table>
     </div>
 </body>
