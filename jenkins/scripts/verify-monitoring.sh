@@ -21,6 +21,7 @@ log_error() { echo -e "${RED}[MONITORING]${NC} ❌ $*"; }
 
 NAMESPACE="${NAMESPACE:-civicpulse}"
 APP_URL="${APP_URL:-http://172.17.184.54:30080}"
+APP_URL="${APP_URL%/}"
 MAX_RETRIES=10
 INTERVAL=10
 

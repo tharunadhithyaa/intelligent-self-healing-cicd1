@@ -9,6 +9,7 @@ set -euo pipefail
 
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 APP_URL="${APP_URL:-http://172.17.184.54:30080}"
+APP_URL="${APP_URL%/}"
 NAMESPACE="${NAMESPACE:-civicpulse}"
 REPORTS_DIR="jenkins/reports/monitoring"
 
