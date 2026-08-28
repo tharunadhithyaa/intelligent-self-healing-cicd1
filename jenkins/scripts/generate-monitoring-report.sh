@@ -36,8 +36,8 @@ cat > "${MD_REPORT}" <<EOF
 | **ML Decision Controller** | ✅ Active / Webhook Listening | \`http://civicpulse-ml-decision-controller:5000/api/v1/alerts\` | 5000 |
 
 ## Self-Healing Remediation Policy
-- **Restart**: Triggers `rollout restart` on Deployment/StatefulSet upon `PodCrashLooping`, `BackendHealthFailing`, or `MongoDBDown`.
-- **Scale**: Triggers `scale` (+1 replica, max 3) upon `HighCpuUsage` or `HighMemoryUsage`.
+- **Restart**: Triggers \`rollout restart\` on Deployment/StatefulSet upon \`PodCrashLooping\`, \`BackendHealthFailing\`, or \`MongoDBDown\`.
+- **Scale**: Triggers \`scale\` (+1 replica, max 3) upon \`HighCpuUsage\` or \`HighMemoryUsage\`.
 - **Rollback**: Triggers zero-commit Argo CD Application parameter rollback to previous build tag upon critical multi-failures (cumulative score >= 20).
 - **Cooldown**: Enforces a 5-minute (300s) rate limit per workload to prevent thrashing.
 
