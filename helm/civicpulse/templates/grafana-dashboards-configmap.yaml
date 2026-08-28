@@ -96,11 +96,11 @@ data:
           ]
         },
         {
-          "title": "Backend API Health Probe (/api/health)",
+          "title": "Backend API Health Probe (/metrics)",
           "type": "stat",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
           "targets": [
-            { "datasource": "Prometheus", "expr": "probe_success{job=\"civicpulse-backend\"}", "legendFormat": "Backend Health" }
+            { "datasource": "Prometheus", "expr": "up{job=\"civicpulse-backend\"}", "legendFormat": "Backend Health" }
           ]
         }
       ],
@@ -117,7 +117,7 @@ data:
           "type": "stat",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
           "targets": [
-            { "datasource": "Prometheus", "expr": "up{job=\"civicpulse-mongodb\"}", "legendFormat": "MongoDB Up" }
+            { "datasource": "Prometheus", "expr": "up{job=\"civicpulse-backend\"}", "legendFormat": "MongoDB Up" }
           ]
         }
       ],
@@ -130,14 +130,14 @@ data:
       "id": 4,
       "panels": [
         {
-          "title": "Nginx Active Connections",
+          "title": "Backend CPU Seconds Total",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
           "targets": [
-            { "datasource": "Prometheus", "expr": "nginx_stat_requests", "legendFormat": "Requests" }
+            { "datasource": "Prometheus", "expr": "rate(civicpulse_process_cpu_seconds_total[5m])", "legendFormat": "CPU Usage" }
           ]
         }
       ],
-      "title": "4. CivicPulse — Nginx Traffic"
+      "title": "4. CivicPulse — Backend CPU Usage"
     }
 {{- end }}

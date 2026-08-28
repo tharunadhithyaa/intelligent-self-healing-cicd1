@@ -28,21 +28,10 @@ data:
           - targets: ['localhost:9090']
 
       - job_name: 'civicpulse-backend'
-        metrics_path: '/api/health'
+        metrics_path: '/metrics'
         scrape_interval: 10s
         static_configs:
           - targets: ['civicpulse-backend:3000']
-
-      - job_name: 'civicpulse-nginx'
-        metrics_path: '/stub_status'
-        scrape_interval: 10s
-        static_configs:
-          - targets: ['civicpulse-nginx:80']
-
-      - job_name: 'civicpulse-mongodb'
-        scrape_interval: 15s
-        static_configs:
-          - targets: ['civicpulse-mongodb:27017']
 
       - job_name: 'kubernetes-pods'
         kubernetes_sd_configs:

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import client from "prom-client";
 import { corsOptions } from "./config/cors.config";
 import { requestLogger } from "./middleware/request-logger.middleware";
 import { errorHandler } from "./middleware/error.middleware";
@@ -18,12 +19,25 @@ import notificationRoutes from "./modules/notifications/notification.routes";
 
 const app: Application = express();
 
+// Enable default Prometheus process metrics collection
+client.collectDefaultMetrics({ prefix: "civicpulse_" });
+
 // Trust reverse proxy (Nginx) for accurate IP rate limiting and X-Forwarded-For handling
 app.set("trust proxy", true);
 
 // Security middleware
 app.use(helmet());
 app.use(cors(corsOptions));
+
+// Prometheus metrics endpoint (placed BEFORE rate limiters)
+app.get(["/metrics", "/api/metrics"], async (_req: Request, res: Response) => {
+  try {
+    res.set("Content-Type", client.register.contentType);
+    res.end(await client.register.metrics());
+  } catch (err) {
+    res.status(500).end((err as Error).message);
+  }
+});
 
 // Health check (placed BEFORE rate limiters so K8s probes never fail with 429)
 app.get("/api/health", (_req: Request, res: Response) => {
@@ -51,7 +65,11 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
-  skip: (req: Request) => req.path === "/health" || req.path === "/api/health",
+  skip: (req: Request) =>
+    req.path === "/health" ||
+    req.path === "/api/health" ||
+    req.path === "/metrics" ||
+    req.path === "/api/metrics",
   message: {
     success: false,
     message: "Too many requests from this IP, please try again later.",
