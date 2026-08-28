@@ -61,7 +61,7 @@ spec:
                   name: civicpulse-grafana-secret
                   key: admin-password
             - name: GF_SERVER_ROOT_URL
-              value: "%(protocol)s://%(domain)s/grafana/"
+              value: "http://172.17.184.54:30080/grafana/"
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
               value: "true"
           ports:
