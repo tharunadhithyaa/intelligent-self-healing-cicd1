@@ -10,7 +10,8 @@ pipeline {
 
     // ── Pipeline Triggers ────────────────────────────────────────────────────
     triggers {
-        pollSCM('H/2 * * * *')
+        // Poll SCM every 15 minutes (or use GitHub Webhooks for push-triggered builds)
+        pollSCM('H/15 * * * *')
     }
 
     // ── Pipeline Options ─────────────────────────────────────────────────────
