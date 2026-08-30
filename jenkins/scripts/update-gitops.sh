@@ -56,36 +56,66 @@ fi
 
 cd "${REPO_ROOT}"
 
-EXPECTED_BACKEND="ghcr.io/tharunadhithyaa/civicpulse-backend:${BUILD_NUMBER}"
-EXPECTED_FRONTEND="ghcr.io/tharunadhithyaa/civicpulse-frontend:${BUILD_NUMBER}"
-EXPECTED_MONGODB="ghcr.io/tharunadhithyaa/civicpulse-mongodb:latest"
-EXPECTED_NGINX="ghcr.io/tharunadhithyaa/civicpulse-nginx:latest"
+GHCR_REGISTRY_VAL="${GHCR_REGISTRY:-ghcr.io}"
+GHCR_OWNER_VAL="${GHCR_OWNER:-tharunadhithyaa}"
+EXPECTED_BACKEND="${GHCR_REGISTRY_VAL}/${GHCR_OWNER_VAL}/civicpulse-backend:${BUILD_NUMBER}"
+EXPECTED_FRONTEND="${GHCR_REGISTRY_VAL}/${GHCR_OWNER_VAL}/civicpulse-frontend:${BUILD_NUMBER}"
+EXPECTED_MONGODB="${GHCR_REGISTRY_VAL}/${GHCR_OWNER_VAL}/civicpulse-mongodb:latest"
+EXPECTED_NGINX="${GHCR_REGISTRY_VAL}/${GHCR_OWNER_VAL}/civicpulse-nginx:latest"
 
 # ── 1. Pre-Deployment GHCR Image Manifest Availability Check ─────────────────
 log_info "Performing pre-deployment GHCR image manifest availability check..."
 
-GHCR_USER=$(echo "${GHCR_USERNAME:-${GHCR_USER:-${GHCR_OWNER:-tharunadhithyaa}}}" | tr -d ' \r\n\t')
+GHCR_USER=$(echo "${GHCR_USERNAME:-${GHCR_USER:-${GHCR_OWNER_VAL}}}" | tr -d ' \r\n\t')
 GHCR_TOKEN_VAL=$(echo "${GHCR_TOKEN:-}" | tr -d ' \r\n\t')
 
-if [ -n "${GHCR_USER}" ] && [ -n "${GHCR_TOKEN_VAL}" ]; then
-    echo "${GHCR_TOKEN_VAL}" | docker login "${GHCR_REGISTRY:-ghcr.io}" -u "${GHCR_USER}" --password-stdin >/dev/null 2>&1 || true
+if [ -n "${GHCR_USER}" ] && [ -n "${GHCR_TOKEN_VAL}" ] && command -v docker &>/dev/null; then
+    echo "${GHCR_TOKEN_VAL}" | docker login "${GHCR_REGISTRY_VAL}" -u "${GHCR_USER}" --password-stdin >/dev/null 2>&1 || true
 fi
 
-if command -v docker &>/dev/null; then
-    if ! docker manifest inspect "${EXPECTED_BACKEND}" >/dev/null 2>&1; then
-        log_error "Backend image '${EXPECTED_BACKEND}' is NOT available in GHCR."
-        log_error "Deployment was not attempted."
-        exit 1
-    fi
-    log_ok "Pre-deployment check: Backend image '${EXPECTED_BACKEND}' verified in GHCR"
+verify_ghcr_image() {
+    local repo_name="$1"
+    local tag="$2"
+    local full_img="${GHCR_REGISTRY_VAL}/${GHCR_OWNER_VAL}/${repo_name}:${tag}"
 
-    if ! docker manifest inspect "${EXPECTED_FRONTEND}" >/dev/null 2>&1; then
-        log_error "Frontend image '${EXPECTED_FRONTEND}' is NOT available in GHCR."
-        log_error "Deployment was not attempted."
-        exit 1
+    # Strategy A: Toolless HTTP Registry API Check via curl
+    if command -v curl &>/dev/null; then
+        local bearer_token=""
+        if [ -n "${GHCR_USER}" ] && [ -n "${GHCR_TOKEN_VAL}" ]; then
+            bearer_token=$(curl -s --max-time 10 -u "${GHCR_USER}:${GHCR_TOKEN_VAL}" "https://${GHCR_REGISTRY_VAL}/token?service=${GHCR_REGISTRY_VAL}&scope=repository:${GHCR_OWNER_VAL}/${repo_name}:pull" 2>/dev/null | grep -o '"token":"[^"]*' | cut -d'"' -f4 || echo "")
+        fi
+        if [ -z "${bearer_token}" ]; then
+            bearer_token=$(curl -s --max-time 10 "https://${GHCR_REGISTRY_VAL}/token?service=${GHCR_REGISTRY_VAL}&scope=repository:${GHCR_OWNER_VAL}/${repo_name}:pull" 2>/dev/null | grep -o '"token":"[^"]*' | cut -d'"' -f4 || echo "")
+        fi
+
+        if [ -n "${bearer_token}" ]; then
+            local http_code
+            http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+                -H "Authorization: Bearer ${bearer_token}" \
+                -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+                "https://${GHCR_REGISTRY_VAL}/v2/${GHCR_OWNER_VAL}/${repo_name}/manifests/${tag}" 2>/dev/null || echo "000")
+            if [ "${http_code}" = "200" ]; then
+                log_ok "Pre-deployment check: Image '${full_img}' verified in GHCR via Registry API (HTTP 200)"
+                return 0
+            fi
+        fi
     fi
-    log_ok "Pre-deployment check: Frontend image '${EXPECTED_FRONTEND}' verified in GHCR"
-fi
+
+    # Strategy B: CLI Check via docker manifest inspect
+    if command -v docker &>/dev/null; then
+        if docker manifest inspect "${full_img}" >/dev/null 2>&1; then
+            log_ok "Pre-deployment check: Image '${full_img}' verified in GHCR via Docker CLI"
+            return 0
+        fi
+    fi
+
+    log_error "FATAL Pre-deployment check failed: Image '${full_img}' is NOT available in GHCR."
+    log_error "Deployment was NOT attempted and Argo CD parameter overrides were NOT updated."
+    return 1
+}
+
+verify_ghcr_image "civicpulse-backend" "${BUILD_NUMBER}" || exit 1
+verify_ghcr_image "civicpulse-frontend" "${BUILD_NUMBER}" || exit 1
 
 # ── 2. Validate K3s Cluster & Argo CD Application Prerequisites ──────────────
 if [ -z "${KUBECONFIG:-}" ]; then

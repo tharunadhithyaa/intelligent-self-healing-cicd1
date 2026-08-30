@@ -1214,8 +1214,38 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 check_img() {
                                     local img="\$1"
                                     local label="\$2"
+                                    local repo_name
+                                    repo_name=\$(echo "\${img}" | awk -F'/' '{print \$NF}' | cut -d':' -f1)
+                                    local tag
+                                    tag=\$(echo "\${img}" | awk -F':' '{print \$NF}')
+
                                     echo "  Verifying image: \${img}..."
-                                    if ! docker manifest inspect "\${img}" >/dev/null 2>&1; then
+                                    local verified=0
+
+                                    if command -v curl &>/dev/null; then
+                                        local token=""
+                                        if [ -n "\${GHCR_TOKEN:-}" ]; then
+                                            token=\$(curl -s --max-time 10 -u "\${GHCR_USERNAME:-${env.GHCR_OWNER}}:\${GHCR_TOKEN}" "https://${env.GHCR_REGISTRY}/token?service=${env.GHCR_REGISTRY}&scope=repository:${env.GHCR_OWNER}/\${repo_name}:pull" 2>/dev/null | grep -o '"token":"[^"]*' | cut -d'"' -f4 || echo "")
+                                        fi
+                                        if [ -n "\${token}" ]; then
+                                            local code
+                                            code=\$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+                                                -H "Authorization: Bearer \${token}" \
+                                                -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+                                                "https://${env.GHCR_REGISTRY}/v2/${env.GHCR_OWNER}/\${repo_name}/manifests/\${tag}" 2>/dev/null || echo "000")
+                                            if [ "\${code}" = "200" ]; then
+                                                verified=1
+                                            fi
+                                        fi
+                                    fi
+
+                                    if [ \${verified} -eq 0 ] && command -v docker &>/dev/null; then
+                                        if docker manifest inspect "\${img}" >/dev/null 2>&1; then
+                                            verified=1
+                                        fi
+                                    fi
+
+                                    if [ \${verified} -eq 0 ]; then
                                         echo "  ❌ FATAL: Image manifest not found in GHCR: \${img}"
                                         exit 1
                                     fi
