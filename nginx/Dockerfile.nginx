@@ -1,7 +1,9 @@
+# syntax=docker/dockerfile:1
 FROM nginx:1.27-alpine
 
 # Perform security updates and install libcap for non-root user 'nginx'
-RUN apk update && apk upgrade --no-cache && \
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk update && apk upgrade --no-cache && \
     apk add --no-cache libcap && \
     setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
     touch /var/run/nginx.pid && \

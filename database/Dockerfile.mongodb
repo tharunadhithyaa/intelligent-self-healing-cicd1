@@ -1,9 +1,12 @@
+# syntax=docker/dockerfile:1
 # Builder stage to compile gosu with an updated Go toolchain (resolves Go stdlib CVEs)
 FROM golang:1.26-alpine AS gosu-builder
 
 ENV CGO_ENABLED=0
 
-RUN apk update && apk upgrade --no-cache && \
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    apk update && apk upgrade --no-cache && \
     apk add --no-cache git && \
     git clone https://github.com/tianon/gosu.git /go/src/github.com/tianon/gosu && \
     cd /go/src/github.com/tianon/gosu && \

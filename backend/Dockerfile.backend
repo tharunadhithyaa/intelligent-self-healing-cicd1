@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build stage
 FROM node:22-alpine AS builder
 
@@ -15,7 +16,8 @@ RUN apk update && apk upgrade --no-cache \
 
 # Install dependencies first for better layer caching
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline --no-audit
 
 # Copy source code and build
 COPY . .
@@ -38,7 +40,8 @@ RUN apk update && apk upgrade --no-cache \
 
 # Copy package files and install only production dependencies
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --prefer-offline --no-audit
 
 # Use non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup && chown -R appuser:appgroup /app

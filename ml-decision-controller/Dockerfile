@@ -1,24 +1,28 @@
+# syntax=docker/dockerfile:1
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    libc-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libc-dev
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install -r requirements.txt
 
 FROM python:3.12-slim AS runner
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     libssl3t64 \
-    openssl-provider-legacy \
-    && rm -rf /var/lib/apt/lists/*
+    openssl-provider-legacy
 
 COPY --from=builder /install /usr/local
 COPY app/ /app/app/

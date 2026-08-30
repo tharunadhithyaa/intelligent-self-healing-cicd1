@@ -47,7 +47,7 @@ pipeline {
         )
         booleanParam(
             name: 'FORCE_REBUILD',
-            defaultValue: true,
+            defaultValue: false,
             description: 'Force Docker image rebuild (--no-cache)'
         )
     }
@@ -792,6 +792,10 @@ ENVEOF
                 echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
 
                 script {
+                    // Enable Docker BuildKit engine & CLI integration for parallel stage builds and layer cache mounts
+                    env.DOCKER_BUILDKIT = '1'
+                    env.COMPOSE_DOCKER_CLI_BUILD = '1'
+
                     // Prune dangling images if enabled
                     if (params.DOCKER_PRUNE) {
                         sh '''
@@ -801,12 +805,12 @@ ENVEOF
                         '''
                     }
 
-                    // Build Docker images tagged with BUILD_NUMBER
+                    // Build Docker images tagged with BUILD_NUMBER using BuildKit cache
                     def buildFlags = params.FORCE_REBUILD ? '--no-cache --pull' : '--pull'
                     if (isUnix()) {
                         sh """
-                            echo "🐳 Building Docker images tagged as ${env.IMAGE_TAG} (flags: ${buildFlags})..."
-                            if ! IMAGE_TAG="${env.IMAGE_TAG}" docker compose build ${buildFlags}; then
+                            echo "🐳 Building Docker images tagged as ${env.IMAGE_TAG} (flags: ${buildFlags}, BuildKit: enabled)..."
+                            if ! DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 IMAGE_TAG="${env.IMAGE_TAG}" docker compose build --parallel ${buildFlags}; then
                                 echo "❌ [DOCKER BUILD] Docker Compose image build failed"
                                 exit 1
                             fi
@@ -815,9 +819,11 @@ ENVEOF
                         """
                     } else {
                         bat """
-                            echo 🐳 Building Docker images tagged as ${env.IMAGE_TAG} (flags: ${buildFlags})...
+                            echo 🐳 Building Docker images tagged as ${env.IMAGE_TAG} (flags: ${buildFlags}, BuildKit: enabled)...
+                            set DOCKER_BUILDKIT=1
+                            set COMPOSE_DOCKER_CLI_BUILD=1
                             set IMAGE_TAG=${env.IMAGE_TAG}
-                            docker compose build ${buildFlags}
+                            docker compose build --parallel ${buildFlags}
                             if errorlevel 1 (
                                 echo ❌ [DOCKER BUILD] Docker Compose image build failed
                                 exit /b 1
