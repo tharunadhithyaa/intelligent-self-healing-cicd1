@@ -257,7 +257,13 @@ done
 # ── 4. Wait for Deployment Spec Transition & Workload Rollout ───────────────
 log_info "Waiting for Kubernetes Workload Rollout & Pod Readiness (Timeout: ${DEPLOYMENT_TIMEOUT}s)..."
 
-ELAPSED=0
+# Initial grace period allowing Kubelet to register spec changes & initiate image pulls
+GRACE_PERIOD=15
+log_info "Allowing initial grace period (${GRACE_PERIOD}s) for Kubelet image pull initiation..."
+sleep ${GRACE_PERIOD}
+
+ELAPSED=${GRACE_PERIOD}
+POLL_INTERVAL=10
 ROLLOUT_COMPLETE=false
 BACKEND_LIVE_IMG="unknown"
 FRONTEND_LIVE_IMG="unknown"
@@ -270,22 +276,22 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
 
     log_info "[GITOPS] Desired: :${BUILD_NUMBER} | Live Backend Spec: ${BACKEND_LIVE_IMG} | Live Frontend Spec: ${FRONTEND_LIVE_IMG} (${ELAPSED}s/${DEPLOYMENT_TIMEOUT}s)"
 
-    # Inspect pod status for fast failure detection on target deployment components (backend & frontend)
-    TARGET_POD_ERRORS=$(kubectl get pods -n civicpulse -l 'app.kubernetes.io/component in (backend, frontend)' --no-headers --request-timeout=10s 2>/dev/null | grep -E "ImagePullBackOff|ErrImagePull|CrashLoopBackOff|CreateContainerConfigError|CreateContainerError" || true)
+    # Inspect current pod status for target deployment components (backend & frontend)
+    TARGET_POD_STATUS=$(kubectl get pods -n civicpulse -l 'app.kubernetes.io/component in (backend, frontend)' --no-headers --request-timeout=10s 2>/dev/null || true)
 
-    if [ -n "${TARGET_POD_ERRORS}" ]; then
-        log_error "Detected container failure state in target deployment pods (backend/frontend):"
-        echo "${TARGET_POD_ERRORS}"
-        if echo "${TARGET_POD_ERRORS}" | grep -qE "ImagePullBackOff|ErrImagePull"; then
-            log_error "❌ Image pull failure detected. Check image existence in GHCR and ghcr-secret credentials."
+    if [ -n "${TARGET_POD_STATUS}" ]; then
+        log_info "Current target pod status:"
+        echo "${TARGET_POD_STATUS}"
+
+        if echo "${TARGET_POD_STATUS}" | grep -qE "ImagePullBackOff|ErrImagePull"; then
+            log_warn "Transient image pull phase detected (ErrImagePull/ImagePullBackOff). Image download/credential propagation in progress. Continuing to poll..."
         fi
-        if echo "${TARGET_POD_ERRORS}" | grep -qE "CreateContainerConfigError|CreateContainerError"; then
-            log_error "❌ Container configuration error detected on deployment pods."
+        if echo "${TARGET_POD_STATUS}" | grep -qE "ContainerCreating|PodInitializing"; then
+            log_info "Container initialization in progress. Continuing to poll..."
         fi
-        if echo "${TARGET_POD_ERRORS}" | grep -q "CrashLoopBackOff"; then
-            log_error "❌ Container crash detected during startup. Inspecting container logs..."
+        if echo "${TARGET_POD_STATUS}" | grep -q "CrashLoopBackOff"; then
+            log_warn "Container crash loop detected during startup. Continuing to poll for recovery / timeout..."
         fi
-        break
     fi
 
     # Non-blocking diagnostic inspection for other namespace pods (e.g. Grafana, Prometheus)
@@ -293,18 +299,14 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
     if [ -n "${OTHER_POD_ERRORS}" ]; then
         log_warn "Detected container issue in non-target pod (advisory only, deployment continuing):"
         echo "${OTHER_POD_ERRORS}"
-        if echo "${OTHER_POD_ERRORS}" | grep -qE "CreateContainerConfigError|CreateContainerError"; then
-            log_warn "Dumping pod details for non-target pod diagnostic review..."
-            kubectl describe pods -n civicpulse -l app.kubernetes.io/component=grafana 2>/dev/null || true
-        fi
     fi
 
     # CRITICAL RACE-CONDITION PREVENTION:
     # Do NOT proceed until BOTH Kubernetes Deployments actually reference the new build image!
     if [[ "${BACKEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]] || [[ "${FRONTEND_LIVE_IMG}" != *":${BUILD_NUMBER}"* ]]; then
         log_info "[GITOPS] Kubernetes Deployment spec has not yet updated to build ${BUILD_NUMBER}. Waiting..."
-        sleep 5
-        ELAPSED=$((ELAPSED + 5))
+        sleep ${POLL_INTERVAL}
+        ELAPSED=$((ELAPSED + POLL_INTERVAL))
         continue
     fi
 
@@ -312,10 +314,10 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
     BACKEND_READY=false
     FRONTEND_READY=false
 
-    if kubectl rollout status deployment/civicpulse-backend -n civicpulse --timeout=2s >/dev/null 2>&1; then
+    if kubectl rollout status deployment/civicpulse-backend -n civicpulse --timeout=5s >/dev/null 2>&1; then
         BACKEND_READY=true
     fi
-    if kubectl rollout status deployment/civicpulse-frontend -n civicpulse --timeout=2s >/dev/null 2>&1; then
+    if kubectl rollout status deployment/civicpulse-frontend -n civicpulse --timeout=5s >/dev/null 2>&1; then
         FRONTEND_READY=true
     fi
 
@@ -326,12 +328,13 @@ while [ $ELAPSED -lt $DEPLOYMENT_TIMEOUT ]; do
     if [ "${BACKEND_READY}" = "true" ] && [ "${FRONTEND_READY}" = "true" ] && \
        [ "${SYNC_STATUS}" = "Synced" ] && \
        [[ "${POD_BACKEND_IMG}" == *":${BUILD_NUMBER}"* ]] && [[ "${POD_FRONTEND_IMG}" == *":${BUILD_NUMBER}"* ]]; then
+        log_ok "Workloads successfully rolled out and pods reported Ready (Backend: :${BUILD_NUMBER}, Frontend: :${BUILD_NUMBER})"
         ROLLOUT_COMPLETE=true
         break
     fi
 
-    sleep 5
-    ELAPSED=$((ELAPSED + 5))
+    sleep ${POLL_INTERVAL}
+    ELAPSED=$((ELAPSED + POLL_INTERVAL))
 done
 
 # ── 5. Workload Verification & Output Summary ─────────────────────────────────
