@@ -1,3 +1,10 @@
+"""
+CivicPulseAI — ML Decision Engine Unit Test Suite
+=================================================
+Tests severity scoring computation, remediation action selection (RESTART, SCALE, ROLLBACK),
+cooldown logic, and Alertmanager webhook processing.
+"""
+
 import pytest
 import time
 from app.models import AlertManagerPayload, AlertItem

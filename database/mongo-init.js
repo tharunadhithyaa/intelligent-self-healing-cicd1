@@ -1,5 +1,8 @@
-// Default MongoDB Initialization Script
-// This script creates the database and default collections
+// ============================================================================
+// CivicPulse AI — MongoDB Database Initialization Script
+// ============================================================================
+// Initializes default database schemas, collections, and indexes on container boot.
+// ============================================================================
 const dbName = (typeof process !== 'undefined' && process && process.env && process.env.MONGO_INITDB_DATABASE)
   ? process.env.MONGO_INITDB_DATABASE
   : 'civicpulse';

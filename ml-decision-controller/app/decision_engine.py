@@ -1,3 +1,10 @@
+"""
+CivicPulseAI — ML Decision Engine
+=================================
+Evaluates firing Prometheus Alertmanager alerts, computes dynamic severity scores,
+enforces 5-minute action cooldowns, and maps alerts to Kubernetes remediation strategies.
+"""
+
 import logging
 import time
 import uuid

@@ -303,3 +303,84 @@ All routes require authentication and specific administrative permissions.
 * **Auth**: Required (`USERS_MANAGE`).
 * **Description**: Send broadcast notification to all system users or specific roles.
 
+---
+
+## 🤖 ML Decision Controller Microservice API (Port `5000`)
+
+The **ML Decision Controller** microservice runs independently to process Alertmanager webhooks and trigger dynamic Kubernetes remediation workflows.
+
+### 1. `POST /api/v1/alerts`
+* **Auth**: Public / Internal Cluster Webhook (Prometheus Alertmanager).
+* **Description**: Webhook ingestion endpoint for Prometheus Alertmanager alert notifications. Computes severity score, evaluates action triggers (`RESTART`, `SCALE`, `ROLLBACK`), checks 5-minute thrashing cooldown, and executes Kubernetes remediation.
+* **Payload**:
+  ```json
+  {
+    "status": "firing",
+    "alerts": [
+      {
+        "status": "firing",
+        "labels": {
+          "alertname": "BackendHealthFailing",
+          "severity": "critical",
+          "namespace": "civicpulse"
+        },
+        "annotations": {
+          "summary": "Backend API health check probe failing"
+        }
+      }
+    ]
+  }
+  ```
+* **Response**: `200 OK`
+  ```json
+  {
+    "status": "success",
+    "decisions_processed": 1,
+    "decisions": [
+      {
+        "target": "civicpulse-backend",
+        "remediation_action": "RESTART",
+        "reason": "Backend API health check probe failing",
+        "cooldown_active": false,
+        "executed": true
+      }
+    ]
+  }
+  ```
+
+### 2. `GET /health`
+* **Auth**: Public.
+* **Description**: Readiness and liveness probe endpoint returning service status and Kubernetes API connectivity state.
+* **Response**: `200 OK`
+  ```json
+  {
+    "status": "healthy",
+    "service": "civicpulse-ml-decision-controller",
+    "k8s_connected": true
+  }
+  ```
+
+### 3. `GET /metrics`
+* **Auth**: Public / Prometheus Scraper.
+* **Description**: Exposes Prometheus-formatted metrics (`civicpulse_ml_alert_webhooks_total`, `civicpulse_ml_remediation_actions_total`, `civicpulse_ml_decision_processing_seconds`).
+* **Response**: `200 OK` (`text/plain; version=0.0.4`)
+
+### 4. `GET /api/v1/decisions`
+* **Auth**: Public / Internal Audit.
+* **Description**: Returns recent historical remediation decision logs for audit and verification.
+* **Response**: `200 OK`
+  ```json
+  {
+    "total_decisions": 5,
+    "history": [
+      {
+        "timestamp": "2026-08-30T12:00:00.000Z",
+        "target": "civicpulse-backend",
+        "action": "RESTART",
+        "executed": true,
+        "cooldown_active": false
+      }
+    ]
+  }
+  ```
+

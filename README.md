@@ -15,20 +15,25 @@ The repository is structured into two main scopes: the **CI/CD Orchestration Lay
 intelligent-self-healing-cicd/
 ├── jenkins/                      # CI/CD config, scripts, and templates
 │   ├── config/
-│   │   └── pipeline.env          # Centralized pipeline variables
+│   │   └── pipeline.env          # Centralized pipeline environment variables
 │   ├── reports/                  # Generated deployment and Trivy vulnerability reports
-│   └── scripts/
-│       ├── cleanup.sh            # Post-build resource pruner
-│       ├── deploy.sh             # Graceful deployment orchestrator
-│       ├── generate-env.sh       # Secure environment config generator
-│       ├── generate-report.sh    # Post-deployment reporter
-│       └── health-check.sh       # Multi-stage health verifier
-├── docs/                         # Detailed DevOps manuals
-│   ├── API_DOCUMENTATION.md      # Comprehensive REST API reference
+│   └── scripts/                  # Lifecycle scripts (cleanup, deploy, health-check, gitops, self-healing)
+├── ml-decision-controller/       # Intelligent ML Self-Healing Microservice (FastAPI + Kubernetes Client)
+│   ├── app/                      # Webhook listener, decision engine, and Kubernetes remediations
+│   ├── tests/                    # Microservice unit test suite
+│   └── Dockerfile                # Production FastAPI container setup
+├── argocd/                       # GitOps Continuous Deployment manifests
+│   └── civicpulse-application.yaml # Argo CD Application specification
+├── helm/                         # Production Kubernetes Helm chart
+│   └── civicpulse/               # CivicPulse AI Helm chart template and values
+├── docs/                         # Comprehensive DevOps and API manuals
+│   ├── API_DOCUMENTATION.md      # Backend & ML Decision Controller REST API reference
 │   ├── ARCHITECTURE.md           # System design & database schemas manual
+│   ├── GITOPS_ARGOCD_GUIDE.md    # Argo CD GitOps architecture and workflow guide
 │   ├── JENKINS_SETUP.md          # Jenkins installation & plugins guide
-│   ├── PIPELINE_ARCHITECTURE.md  # Detailed pipeline execution stages
-│   └── POLL_SCM_SETUP.md         # Automated SCM polling trigger guide
+│   ├── PIPELINE_ARCHITECTURE.md  # Stage-by-stage pipeline execution guide
+│   ├── POLL_SCM_SETUP.md         # Automated SCM polling trigger guide
+│   └── self-healing.md           # Self-healing remediation viva demonstration guide
 ├── backend/                      # Node.js/Express TypeScript backend
 │   ├── src/                      # API modules (Auth, Citizen, Complaints, Admin, AI-Chat, Officer, Field-Worker, Notifications)
 │   └── Dockerfile.backend        # Multi-stage Node 22 production container
@@ -39,8 +44,8 @@ intelligent-self-healing-cicd/
 │   └── Dockerfile.mongodb        # Custom MongoDB 8.0 setup
 ├── nginx/                        # Routing & Static Assets Reverse Proxy
 │   └── Dockerfile.nginx          # Custom Nginx routing and cache config
-├── Jenkinsfile                   # Declarative pipeline script definition (13 stages)
-└── docker-compose.yml            # Multi-service runtime orchestrator (5 services)
+├── Jenkinsfile                   # Declarative pipeline script definition (15 stages)
+└── docker-compose.yml            # Multi-service local runtime orchestrator
 ```
 
 ### Key Orchestration Files:
@@ -55,7 +60,7 @@ intelligent-self-healing-cicd/
 ## ⚡ Key Capabilities & Features
 
 ### 🔄 1. Multi-Stage CI/CD Pipeline
-Automated end-to-end delivery split into 13 distinct execution stages:
+Automated end-to-end delivery split into 15 distinct execution stages:
 1.  **Checkout Source Code**: Clones source repo and captures git metadata (`GIT_COMMIT_SHORT`, `GIT_AUTHOR`).
 2.  **Environment Validation**: Checks pre-requisites (Docker, Docker Compose, Git, Node, npm) and auto-generates default `.env` files.
 3.  **Install Dependencies**: Installs node modules in parallel (`npm ci`) for backend and frontend.
@@ -67,8 +72,10 @@ Automated end-to-end delivery split into 13 distinct execution stages:
 9.  **Docker Build**: Generates production-ready, size-optimized container images tagged with `${BUILD_NUMBER}`.
 10. **Trivy Image Scan**: Scans all container images and archives vulnerability reports.
 11. **Push Images to GHCR**: Tags and pushes build images (`ghcr.io/tharunadhithyaa/civicpulse-*:tag`) to GitHub Container Registry.
-12. **Update GitOps Repository**: Updates `helm/civicpulse/values.yaml` image tags to `${BUILD_NUMBER}` and pushes strictly to the `gitops` branch for Argo CD.
-13. **Health Verification & Report**: Verifies deployment health and publishes build execution reports.
+12. **Deploy via Argo CD**: Zero-commit deployment that patches Argo CD parameters (`image.tag = BUILD_NUMBER`) directly in K3s.
+13. **Verify Self-Healing Controller & Remediations**: Audits real-time K3s cluster health, ML decision controller readiness, and remediation triggers.
+14. **Health Verification**: Layered HTTP endpoint and container probe verifications.
+15. **Deployment Report**: Publishes consolidated build, security, and deployment status reports.
 
 > **Note on Branch Architecture & Poll SCM**:
 > - **`main` Branch**: Pushed by developers. Monitored strictly by Jenkins Poll SCM (`*/main`).

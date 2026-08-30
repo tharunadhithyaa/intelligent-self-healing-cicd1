@@ -2,8 +2,8 @@
 # ============================================================================
 # CivicPulseAI — Deployment Script
 # ============================================================================
-# Orchestrates graceful shutdown, cleanup, and fresh deployment via
-# Docker Compose. Called by Jenkinsfile Stage 7.
+# Orchestrates graceful deployment, storage recovery, and container lifecycle
+# via Docker Compose.
 # ============================================================================
 set -euo pipefail
 

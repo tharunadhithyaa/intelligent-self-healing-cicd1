@@ -1,3 +1,10 @@
+"""
+CivicPulseAI — Kubernetes Remediation Action Handler
+===================================================
+Executes active Kubernetes remediation routines including deployment rollout restarts,
+replica scaling, and Argo CD Application zero-commit rollback patches.
+"""
+
 import logging
 import os
 import time

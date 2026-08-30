@@ -1,3 +1,10 @@
+"""
+CivicPulseAI — ML Decision Controller Data Models
+=================================================
+Pydantic schemas for Prometheus Alertmanager payloads, remediation decision logs,
+and API HTTP response models.
+"""
+
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime

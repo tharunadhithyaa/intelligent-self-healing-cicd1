@@ -1,3 +1,10 @@
+/**
+ * CivicPulse AI — Express API Server Bootstrap
+ * ============================================
+ * Initializes database connectivity, starts HTTP listener on configured port,
+ * and attaches graceful process termination shutdown handlers.
+ */
+
 import app from "./app";
 import config from "./config";
 import { connectDatabase, disconnectDatabase } from "./config/database.config";

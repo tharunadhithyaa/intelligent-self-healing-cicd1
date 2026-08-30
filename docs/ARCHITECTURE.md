@@ -8,43 +8,59 @@ This document outlines the codebase directory structure, database models, securi
 
 ```
 intelligent-self-healing-cicd/
-├── backend/
+├── jenkins/                      # CI/CD config, scripts, templates, and execution reports
+│   ├── config/
+│   │   └── pipeline.env          # Centralized environment tuning parameters
+│   ├── scripts/                  # Lifecycle scripts (cleanup, deploy, health-check, gitops, self-healing)
+│   └── reports/                  # Deployment logs and Trivy security scanner artifacts
+├── ml-decision-controller/       # Intelligent Self-Healing Microservice (FastAPI + Kubernetes Client)
+│   ├── app/                      # Webhook listener, decision engine, and Kubernetes remediations
+│   ├── tests/                    # Microservice unit test suite
+│   └── Dockerfile                # Production FastAPI container setup
+├── argocd/                       # GitOps Continuous Deployment manifests
+│   └── civicpulse-application.yaml # Argo CD Application specification
+├── helm/                         # Production Kubernetes Helm chart
+│   └── civicpulse/               # CivicPulse AI Helm chart template and values
+├── docs/                         # Comprehensive DevOps and API manuals
+│   ├── API_DOCUMENTATION.md      # Backend & ML Decision Controller REST API reference
+│   ├── ARCHITECTURE.md           # System design & database schemas manual
+│   ├── GITOPS_ARGOCD_GUIDE.md    # Argo CD GitOps architecture and workflow guide
+│   ├── JENKINS_SETUP.md          # Jenkins installation & plugins guide
+│   ├── PIPELINE_ARCHITECTURE.md  # Stage-by-stage pipeline execution guide
+│   ├── POLL_SCM_SETUP.md         # Automated SCM polling trigger guide
+│   └── self-healing.md           # Self-healing remediation viva demonstration guide
+├── backend/                      # Node.js/Express TypeScript API gateway
 │   ├── src/
-│   │   ├── config/             # Database connection, CORS, rate limiter configs
-│   │   ├── constants/          # Role configurations, permission mappings, error messages
-│   │   ├── interfaces/         # TypeScript interfaces for models and API payloads
-│   │   ├── middleware/         # JWT auth verify, permission guard, security input sanitizers, logging
-│   │   ├── models/             # Mongoose schemas (User, Role, Complaint, Department, AuditLog, Conversation, Notification, RefreshToken)
-│   │   ├── modules/            # Domain APIs (auth, citizen, complaints, admin, ai-chat, officer, field-worker, notifications)
-│   │   ├── repositories/       # Database access repository abstraction layers
-│   │   ├── utils/              # JWT, password hashing, winston logger, in-memory cache
-│   │   ├── app.ts              # Express application assembly & route registrations
-│   │   └── server.ts           # Express server bootstrap & MongoDB connection setup
-│   ├── Dockerfile.backend      # Multi-stage production Docker container (Node 22)
+│   │   ├── config/               # Database connection, CORS, rate limiter configs
+│   │   ├── constants/            # Role configurations, permission mappings, error messages
+│   │   ├── interfaces/           # TypeScript interfaces for models and API payloads
+│   │   ├── middleware/           # JWT auth verify, permission guard, security input sanitizers, logging
+│   │   ├── models/               # Mongoose schemas (User, Role, Complaint, Department, AuditLog, Conversation, Notification, RefreshToken)
+│   │   ├── modules/              # Domain APIs (auth, citizen, complaints, admin, ai-chat, officer, field-worker, notifications)
+│   │   ├── repositories/         # Database access repository abstraction layers
+│   │   ├── utils/                # JWT, password hashing, winston logger, in-memory cache
+│   │   ├── app.ts                # Express application assembly & route registrations
+│   │   └── server.ts             # Express server bootstrap & MongoDB connection setup
+│   ├── Dockerfile.backend        # Multi-stage production Docker container (Node 22)
 │   └── tsconfig.json
-├── frontend/
+├── frontend/                     # Angular 22 standalone web application
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── core/           # Auth guards, API constant lists, HTTP interceptors
-│   │   │   ├── layouts/        # Layout shells (Main navigation sidebar, topbar)
-│   │   │   ├── shared/         # Reusable charts, modals, chatbot widget
-│   │   │   └── features/       # Feature modules (Citizen Dashboard, Officer Workspace, Field Worker View, Admin Portal)
-│   │   ├── styles/             # Modular SCSS stylesheets
+│   │   │   ├── core/             # Auth guards, API constant lists, HTTP interceptors
+│   │   │   ├── layouts/          # Layout shells (Main navigation sidebar, topbar)
+│   │   │   ├── shared/           # Reusable charts, modals, chatbot widget
+│   │   │   └── features/         # Feature modules (Citizen Dashboard, Officer Workspace, Field Worker View, Admin Portal)
+│   │   ├── styles/               # Modular SCSS stylesheets
 │   │   └── index.html
-│   ├── Dockerfile.frontend     # Multi-stage production Nginx container (Angular 22)
-│   └── nginx.conf              # SPA fallback routing configuration
-├── database/
-│   └── Dockerfile.mongodb      # Custom MongoDB 8.0 container setup
-├── nginx/
-│   ├── Dockerfile.nginx        # Reverse proxy container
-│   └── nginx.conf              # Port 80 routing and caching configuration
-├── jenkins/
-│   ├── config/
-│   │   └── pipeline.env        # Centralized environment tuning parameters
-│   ├── scripts/                # Self-healing CI/CD lifecycle shell scripts
-│   └── reports/                # Deployment logs and Trivy security scanner artifacts
-├── Jenkinsfile                 # Declarative pipeline script (13 stages)
-└── docker-compose.yml          # Multi-service runtime orchestrator
+│   ├── Dockerfile.frontend       # Multi-stage production Nginx container (Angular 22)
+│   └── nginx.conf                # SPA fallback routing configuration
+├── database/                     # MongoDB container configuration
+│   └── Dockerfile.mongodb        # Custom MongoDB 8.0 setup
+├── nginx/                        # Reverse Proxy & Static Asset Gateway
+│   ├── Dockerfile.nginx          # Reverse proxy container setup
+│   └── nginx.conf                # Port 80 routing and caching configuration
+├── Jenkinsfile                   # Declarative pipeline script (15 stages)
+└── docker-compose.yml            # Multi-service local runtime orchestrator
 ```
 
 ---

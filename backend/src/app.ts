@@ -1,3 +1,10 @@
+/**
+ * CivicPulse AI — Express Application Assembly
+ * ============================================
+ * Configures security middleware, rate limiters, CORS policy, Prometheus metrics,
+ * request sanitization, domain route registrations, and global error handling.
+ */
+
 import express, { Application, Request, Response } from "express";
 import mongoose from "mongoose";
 import cors from "cors";

@@ -1,3 +1,10 @@
+"""
+CivicPulseAI — ML Decision Controller Main API Server
+=====================================================
+FastAPI application handling Alertmanager webhooks, health probes, Prometheus metrics,
+and decision audit trail history for automated Kubernetes self-healing remediations.
+"""
+
 import logging
 import os
 from typing import List, Dict, Any, Optional
