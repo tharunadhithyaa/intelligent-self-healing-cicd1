@@ -89,6 +89,14 @@ def list_recent_decisions(limit: int = 20):
     """
     return engine.get_recent_decisions(limit=limit)
 
+@app.post("/api/v1/reset-cooldown")
+def reset_cooldown():
+    """
+    Resets active action cooldown timers for test verification suites.
+    """
+    engine.last_action_times.clear()
+    return {"status": "cooldown_reset", "message": "All action cooldown timers cleared."}
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 5000))
