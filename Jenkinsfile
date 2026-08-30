@@ -1445,6 +1445,11 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                             else
                                 echo "  ⚠️ ML Decision Controller pod not yet running or still starting"
                             fi
+
+                            chmod +x jenkins/scripts/verify-self-healing.sh 2>/dev/null || true
+                            if [ -x jenkins/scripts/verify-self-healing.sh ]; then
+                                ./jenkins/scripts/verify-self-healing.sh || true
+                            fi
                         '''
                     } catch (Exception e) {
                         echo "WARNING: ML Decision Controller verification failed (non-blocking): ${e}"
