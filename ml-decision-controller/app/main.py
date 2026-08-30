@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Response, status, Request
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
@@ -90,10 +90,13 @@ def list_recent_decisions(limit: int = 20):
     return engine.get_recent_decisions(limit=limit)
 
 @app.post("/api/v1/reset-cooldown")
-def reset_cooldown():
+def reset_cooldown(target_key: Optional[str] = None):
     """
     Resets active action cooldown timers for test verification suites.
     """
+    if target_key:
+        engine.last_action_times.pop(target_key, None)
+        return {"status": "cooldown_reset", "message": f"Cooldown timer for '{target_key}' cleared."}
     engine.last_action_times.clear()
     return {"status": "cooldown_reset", "message": "All action cooldown timers cleared."}
 

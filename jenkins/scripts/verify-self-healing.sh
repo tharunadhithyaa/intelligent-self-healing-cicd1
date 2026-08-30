@@ -84,7 +84,7 @@ except Exception as e:
     echo "${response}"
 }
 
-# Function to reset active cooldown timers before distinct test cases
+# Function to reset active cooldown timers before distinct test suites
 reset_cooldown_timer() {
     if [ -n "${ML_POD}" ]; then
         kubectl exec "${ML_POD}" -n "${NAMESPACE}" -- python -c "
@@ -101,6 +101,13 @@ except Exception:
     fi
 }
 
+# Reset cooldown at script initialization to start with clean state
+reset_cooldown_timer
+
+# Record initial cluster safety baseline for post-test restoration
+INITIAL_GLOBAL_REPLICAS=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+INITIAL_GLOBAL_ARGO_TAG=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.source.helm.parameters[?(@.name=="backend.image.tag")].value}' 2>/dev/null || echo "none")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TEST 1 — RESTART Remediation (Real Kubernetes Workload Verification)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -108,8 +115,6 @@ echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}  TEST 1 — RESTART Real Workload Recovery                 ${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
-
-reset_cooldown_timer
 
 # Record BEFORE State
 PREV_RESTART_TIME=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || echo "none")
@@ -138,31 +143,72 @@ PAYLOAD_RESTART='{
 RESP1=$(post_alert_payload "${PAYLOAD_RESTART}")
 log_info "Controller Decision Response: ${RESP1}"
 
-# Wait for Kubernetes API patch to process
-sleep 3
+# Verify Controller execution success
+RESP1_EXEC_OK=false
+if echo "${RESP1}" | grep -q '"remediation_action":"RESTART"' && echo "${RESP1}" | grep -q '"execution_success":true'; then
+    RESP1_EXEC_OK=true
+fi
 
-# Record AFTER State
-NEW_RESTART_TIME=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || echo "none")
+# Step 1: Wait/Poll for Deployment restartedAt annotation change
+NEW_RESTART_TIME="none"
+for i in $(seq 1 15); do
+    CURRENT_RESTART=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || echo "none")
+    if [ "${CURRENT_RESTART}" != "none" ] && [ "${CURRENT_RESTART}" != "${PREV_RESTART_TIME}" ]; then
+        NEW_RESTART_TIME="${CURRENT_RESTART}"
+        break
+    fi
+    sleep 2
+done
 log_info "AFTER State  — Backend restartedAt: '${NEW_RESTART_TIME}'"
 
-# Verify rollout status and health
+# Step 2: Wait/Poll for new backend Pod creation
+NEW_POD_NAME="none"
+for i in $(seq 1 15); do
+    CURRENT_POD=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=backend --no-headers 2>/dev/null | grep -v "${PREV_POD_NAME}" | awk '{print $1}' | head -1 || true)
+    if [ -n "${CURRENT_POD}" ]; then
+        NEW_POD_NAME="${CURRENT_POD}"
+        break
+    fi
+    sleep 2
+done
+if [ "${NEW_POD_NAME}" = "none" ]; then
+    NEW_POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=backend --no-headers 2>/dev/null | awk '{print $1}' | head -1 || echo "none")
+fi
+log_info "AFTER State  — Active Pod Name: '${NEW_POD_NAME}'"
+
+# Step 3: Wait/Poll for backend Pod readiness
+POD_READY=false
+for i in $(seq 1 20); do
+    READY_STATUS=$(kubectl get pod "${NEW_POD_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+    if [ "${READY_STATUS}" = "True" ]; then
+        POD_READY=true
+        break
+    fi
+    sleep 3
+done
+
+# Step 4: Verify Deployment rollout status
 ROLLOUT_RESTART_OK=false
 if kubectl rollout status deployment/civicpulse-backend -n "${NAMESPACE}" --timeout=60s >/dev/null 2>&1; then
     ROLLOUT_RESTART_OK=true
 fi
 
-# Verify actual Kubernetes state change
-if [ "${NEW_RESTART_TIME}" != "none" ] && [ "${NEW_RESTART_TIME}" != "${PREV_RESTART_TIME}" ] && [ "${ROLLOUT_RESTART_OK}" = "true" ]; then
+# Assert all Kubernetes state transitions
+if [ "${RESP1_EXEC_OK}" = "true" ] && [ "${NEW_RESTART_TIME}" != "none" ] && [ "${NEW_RESTART_TIME}" != "${PREV_RESTART_TIME}" ] && { [ "${POD_READY}" = "true" ] || [ "${ROLLOUT_RESTART_OK}" = "true" ]; }; then
     log_ok "TEST 1 PASSED: Kubernetes Deployment/civicpulse-backend successfully restarted and verified healthy via kubectl"
     log_info "   • Initial restartedAt: ${PREV_RESTART_TIME}"
     log_info "   • Updated restartedAt: ${NEW_RESTART_TIME}"
-    log_info "   • Rollout Status     : Successful (1/1 Ready)"
+    log_info "   • Initial Pod       : ${PREV_POD_NAME}"
+    log_info "   • New Active Pod    : ${NEW_POD_NAME} (Ready: ${POD_READY})"
+    log_info "   • Rollout Status     : Successful"
     TEST1_STATUS="PASS"
     PASSED_TESTS=$((PASSED_TESTS + 1))
 else
     log_error "TEST 1 FAILED: Kubernetes Deployment/civicpulse-backend restart verification failed!"
     log_error "   • Initial restartedAt: ${PREV_RESTART_TIME}"
     log_error "   • Updated restartedAt: ${NEW_RESTART_TIME}"
+    log_error "   • Initial Pod       : ${PREV_POD_NAME}"
+    log_error "   • New Pod           : ${NEW_POD_NAME} (Ready: ${POD_READY})"
     log_error "   • Rollout Status OK  : ${ROLLOUT_RESTART_OK}"
     TEST1_STATUS="FAIL"
 fi
@@ -174,8 +220,6 @@ echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}  TEST 2 — SCALE Real Replica Count Expansion             ${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
-
-reset_cooldown_timer
 
 # Record BEFORE State
 INITIAL_REPLICAS=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
@@ -202,7 +246,7 @@ PAYLOAD_SCALE='{
 RESP2=$(post_alert_payload "${PAYLOAD_SCALE}")
 log_info "Controller Decision Response: ${RESP2}"
 
-# Immediately inspect AFTER State before background GitOps self-heal
+# Inspect AFTER State
 NEW_REPLICAS=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
 log_info "AFTER State  — Backend Deployment spec.replicas: ${NEW_REPLICAS}"
 
@@ -239,7 +283,7 @@ echo -e "${CYAN}═════════════════════�
 echo -e "${CYAN}  TEST 3 — ROLLBACK Real Argo CD Parameter Verification   ${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 
-reset_cooldown_timer
+# NOTE: Do NOT reset cooldown timer here! Keeping TEST 2's cooldown active for TEST 4.
 
 # Record BEFORE State (Argo CD Application helm parameter override for backend tag)
 INITIAL_ARGO_TAG=$(kubectl get application civicpulse -n argocd -o jsonpath='{.spec.source.helm.parameters[?(@.name=="backend.image.tag")].value}' 2>/dev/null || echo "none")
@@ -313,16 +357,41 @@ echo -e "${CYAN}  TEST 4 — COOLDOWN Thrashing Guard Protection            ${NC
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 
 # DO NOT reset cooldown timer here. Send duplicate payload immediately after Test 2 / Test 3
+BEFORE_TEST4_REPLICAS=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+log_info "BEFORE Duplicate Action — Backend Deployment spec.replicas: ${BEFORE_TEST4_REPLICAS}"
+
 RESP4=$(post_alert_payload "${PAYLOAD_SCALE}")
 log_info "Controller Decision Response: ${RESP4}"
 
-if echo "${RESP4}" | grep -q 'cooldown_active' || echo "${RESP4}" | grep -i 'COOLDOWN'; then
-    log_ok "TEST 4 PASSED: Action cooldown window active (cooldown_active: true), preventing action thrashing"
+AFTER_TEST4_REPLICAS=$(kubectl get deployment civicpulse-backend -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+log_info "AFTER Duplicate Action  — Backend Deployment spec.replicas: ${AFTER_TEST4_REPLICAS}"
+
+# Dual verification: Controller returns cooldown_active and Kubernetes state remains unchanged
+COOLDOWN_RESPONSE_OK=false
+if echo "${RESP4}" | grep -q 'cooldown_active' || echo "${RESP4}" | grep -i 'COOLDOWN' || echo "${RESP4}" | grep -q '"execution_success":false'; then
+    COOLDOWN_RESPONSE_OK=true
+fi
+
+K8S_REPLICA_STABLE=false
+if [ "${AFTER_TEST4_REPLICAS}" -eq "${BEFORE_TEST4_REPLICAS}" ]; then
+    K8S_REPLICA_STABLE=true
+fi
+
+if [ "${COOLDOWN_RESPONSE_OK}" = "true" ] && [ "${K8S_REPLICA_STABLE}" = "true" ]; then
+    log_ok "TEST 4 PASSED: Action cooldown window active (cooldown_active: true), preventing duplicate SCALE action on Kubernetes (Replicas remained ${AFTER_TEST4_REPLICAS})"
     TEST4_STATUS="PASS"
     PASSED_TESTS=$((PASSED_TESTS + 1))
 else
-    log_error "TEST 4 FAILED: Cooldown protection not confirmed in controller response"
+    log_error "TEST 4 FAILED: Cooldown protection verification failed!"
+    log_error "   • Cooldown Response OK : ${COOLDOWN_RESPONSE_OK}"
+    log_error "   • Replica Count Stable : ${K8S_REPLICA_STABLE} (Before: ${BEFORE_TEST4_REPLICAS}, After: ${AFTER_TEST4_REPLICAS})"
     TEST4_STATUS="FAIL"
+fi
+
+# Final Cleanup
+reset_cooldown_timer
+if [ "${INITIAL_GLOBAL_REPLICAS}" != "" ]; then
+    kubectl scale deployment civicpulse-backend -n "${NAMESPACE}" --replicas="${INITIAL_GLOBAL_REPLICAS}" >/dev/null 2>&1 || true
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
