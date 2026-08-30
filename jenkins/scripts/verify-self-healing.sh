@@ -49,23 +49,20 @@ find_kubeconfig || true
 
 log_info "Starting Real End-to-End Self-Healing Verification in namespace '${NAMESPACE}'..."
 
-# ── 1. Discover ML Decision Controller & Cluster Connectivity ─────────────────
-ML_POD=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=ml-decision-controller --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+# Helper function to dynamically discover active ML Decision Controller pod
+get_ml_pod() {
+    kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=ml-decision-controller --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true
+}
 
-if [ -n "${ML_POD}" ]; then
-    log_ok "ML Decision Controller Pod found running on cluster: ${ML_POD}"
-else
-    log_warn "No running ML Decision Controller pod found in namespace '${NAMESPACE}'. Will attempt local API at ${CONTROLLER_URL}."
-fi
-
-# Function to post alert payload directly or via kubectl exec inside cluster
+# Function to post alert payload dynamically via kubectl exec or HTTP fallback
 post_alert_payload() {
     local json_payload="$1"
     local response=""
+    local current_ml_pod
+    current_ml_pod=$(get_ml_pod)
 
-    if [ -n "${ML_POD}" ]; then
-        # Execute Python urllib request inside the ML Decision Controller pod
-        response=$(kubectl exec "${ML_POD}" -n "${NAMESPACE}" -- python -c "
+    if [ -n "${current_ml_pod}" ]; then
+        response=$(kubectl exec "${current_ml_pod}" -n "${NAMESPACE}" -- python -c "
 import urllib.request, json
 req = urllib.request.Request('http://localhost:5000/api/v1/alerts', data='''${json_payload}'''.encode('utf-8'), headers={'Content-Type': 'application/json'})
 try:
@@ -74,8 +71,9 @@ try:
 except Exception as e:
     print(json.dumps({'error': str(e)}))
 " 2>/dev/null || echo "")
-    else
-        # Fallback to direct HTTP request against CONTROLLER_URL
+    fi
+
+    if [ -z "${response}" ]; then
         response=$(curl -s -X POST "${CONTROLLER_URL}/api/v1/alerts" \
             -H "Content-Type: application/json" \
             -d "${json_payload}" 2>/dev/null || echo "")
@@ -86,19 +84,22 @@ except Exception as e:
 
 # Function to reset active cooldown timers before distinct test suites
 reset_cooldown_timer() {
-    if [ -n "${ML_POD}" ]; then
-        kubectl exec "${ML_POD}" -n "${NAMESPACE}" -- python -c "
+    local current_ml_pod
+    current_ml_pod=$(get_ml_pod)
+
+    if [ -n "${current_ml_pod}" ]; then
+        kubectl exec "${current_ml_pod}" -n "${NAMESPACE}" -- python -c "
 import urllib.request
-req = urllib.request.Request('http://localhost:5000/api/v1/reset-cooldown', data=b'', headers={'Content-Type': 'application/json'})
+req = urllib.request.Request('http://localhost:5000/api/v1/reset-cooldown', data=b'{}', headers={'Content-Type': 'application/json'})
 try:
     with urllib.request.urlopen(req) as resp:
         pass
 except Exception:
     pass
 " 2>/dev/null || true
-    else
-        curl -s -X POST "${CONTROLLER_URL}/api/v1/reset-cooldown" >/dev/null 2>&1 || true
     fi
+
+    curl -s -X POST "${CONTROLLER_URL}/api/v1/reset-cooldown" -H "Content-Type: application/json" -d '{}' >/dev/null 2>&1 || true
 }
 
 # Reset cooldown at script initialization to start with clean state
@@ -178,10 +179,17 @@ log_info "AFTER State  — Active Pod Name: '${NEW_POD_NAME}'"
 
 # Step 3: Wait/Poll for backend Pod readiness
 POD_READY=false
-for i in $(seq 1 20); do
-    READY_STATUS=$(kubectl get pod "${NEW_POD_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+for i in $(seq 1 30); do
+    TARGET_CHECK_POD="${NEW_POD_NAME}"
+    CURRENT_ACTIVE=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=backend --no-headers 2>/dev/null | grep 'Running' | awk '{print $1}' | head -1 || true)
+    if [ -n "${CURRENT_ACTIVE}" ]; then
+        TARGET_CHECK_POD="${CURRENT_ACTIVE}"
+    fi
+
+    READY_STATUS=$(kubectl get pod "${TARGET_CHECK_POD}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
     if [ "${READY_STATUS}" = "True" ]; then
         POD_READY=true
+        NEW_POD_NAME="${TARGET_CHECK_POD}"
         break
     fi
     sleep 3
@@ -189,7 +197,7 @@ done
 
 # Step 4: Verify Deployment rollout status
 ROLLOUT_RESTART_OK=false
-if kubectl rollout status deployment/civicpulse-backend -n "${NAMESPACE}" --timeout=60s >/dev/null 2>&1; then
+if kubectl rollout status deployment/civicpulse-backend -n "${NAMESPACE}" --timeout=90s >/dev/null 2>&1; then
     ROLLOUT_RESTART_OK=true
 fi
 

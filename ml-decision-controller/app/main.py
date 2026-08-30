@@ -90,13 +90,22 @@ def list_recent_decisions(limit: int = 20):
     return engine.get_recent_decisions(limit=limit)
 
 @app.post("/api/v1/reset-cooldown")
-def reset_cooldown(target_key: Optional[str] = None):
+async def reset_cooldown(request: Request, target_key: Optional[str] = None):
     """
     Resets active action cooldown timers for test verification suites.
     """
-    if target_key:
-        engine.last_action_times.pop(target_key, None)
-        return {"status": "cooldown_reset", "message": f"Cooldown timer for '{target_key}' cleared."}
+    key_to_reset = target_key
+    if not key_to_reset:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                key_to_reset = body.get("target_key")
+        except Exception:
+            pass
+
+    if key_to_reset:
+        engine.last_action_times.pop(key_to_reset, None)
+        return {"status": "cooldown_reset", "message": f"Cooldown timer for '{key_to_reset}' cleared."}
     engine.last_action_times.clear()
     return {"status": "cooldown_reset", "message": "All action cooldown timers cleared."}
 
