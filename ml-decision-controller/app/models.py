@@ -7,7 +7,6 @@ and API HTTP response models.
 
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
 class AlertItem(BaseModel):
@@ -39,10 +38,16 @@ class DecisionLog(BaseModel):
     namespace: str
     target_workload: str
     target_kind: str
-    remediation_action: str  # RESTART, SCALE, ROLLBACK, NONE
+    remediation_action: str  # RESTART, SCALE, SCALE_DOWN, ROLLBACK, NONE
     severity_score: float
     reason: str
     execution_success: bool
+    escalation_tier: Optional[int] = 1
+    circuit_breaker_state: Optional[str] = "CLOSED"
+    verification_success: Optional[bool] = True
+    verification_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    predictive_flag: Optional[bool] = False
+    duration_seconds: Optional[float] = 0.0
     details: Dict[str, Any] = Field(default_factory=dict)
 
 

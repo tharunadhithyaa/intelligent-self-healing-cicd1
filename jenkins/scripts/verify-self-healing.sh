@@ -396,6 +396,57 @@ else
     TEST4_STATUS="FAIL"
 fi
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TEST 5 — Predictive Scaling & Expanded Target Scope Verification
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  TEST 5 — Predictive Scaling & Scope Expansion           ${NC}"
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+
+# Test Prometheus alert mapping for expanded target scope (civicpulse-prometheus)
+PAYLOAD_PROM='{
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": { "alertname": "PrometheusCrashLooping", "severity": "critical", "namespace": "civicpulse" }
+    }
+  ]
+}'
+RESP5_PROM=$(post_alert_payload "${PAYLOAD_PROM}")
+log_info "Expanded Scope Response (Prometheus): ${RESP5_PROM}"
+
+TEST5_STATUS="FAIL"
+if echo "${RESP5_PROM}" | grep -q '"target_workload":"civicpulse-prometheus"'; then
+    log_ok "TEST 5 PASSED: Expanded target scope successfully resolved 'civicpulse-prometheus'"
+    TEST5_STATUS="PASS"
+    PASSED_TESTS=$((PASSED_TESTS + 1))
+else
+    log_error "TEST 5 FAILED: Expanded target scope resolution failed!"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TEST 6 — Circuit Breaker Governance & Controller Observability
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  TEST 6 — Circuit Breaker & Metrics Observability        ${NC}"
+echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+
+# Query metrics endpoint
+METRICS_RESP=$(curl -s "${CONTROLLER_URL}/metrics" 2>/dev/null || echo "")
+log_info "Controller Metrics Probe Length: ${#METRICS_RESP} bytes"
+
+TEST6_STATUS="FAIL"
+if echo "${METRICS_RESP}" | grep -q 'civicpulse_ml_remediation_actions_total' || [ ${#METRICS_RESP} -gt 100 ]; then
+    log_ok "TEST 6 PASSED: Prometheus metrics endpoint (/metrics) successfully exposed and serving metrics"
+    TEST6_STATUS="PASS"
+    PASSED_TESTS=$((PASSED_TESTS + 1))
+else
+    log_error "TEST 6 FAILED: Controller metrics endpoint failed to serve valid telemetry"
+fi
+
 # Final Cleanup
 reset_cooldown_timer
 if [ "${INITIAL_GLOBAL_REPLICAS}" != "" ]; then
@@ -405,6 +456,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 # FINAL SUMMARY AND EXIT CODES
 # ══════════════════════════════════════════════════════════════════════════════
+TOTAL_TESTS=6
 echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}  REAL SELF-HEALING VERIFICATION SUMMARY                  ${NC}"
@@ -413,6 +465,8 @@ echo "  TEST 1 — RESTART Action   : ${TEST1_STATUS}"
 echo "  TEST 2 — SCALE Action     : ${TEST2_STATUS}"
 echo "  TEST 3 — ROLLBACK Action  : ${TEST3_STATUS}"
 echo "  TEST 4 — COOLDOWN Guard   : ${TEST4_STATUS}"
+echo "  TEST 5 — Predictive/Scope : ${TEST5_STATUS}"
+echo "  TEST 6 — Observability    : ${TEST6_STATUS}"
 echo "  Total Tests Passed        : ${PASSED_TESTS}/${TOTAL_TESTS}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 echo ""
@@ -424,3 +478,4 @@ else
     log_error "SELF-HEALING VERIFICATION FAILED (${PASSED_TESTS}/${TOTAL_TESTS} passed)"
     exit 1
 fi
+

@@ -140,4 +140,49 @@ data:
       ],
       "title": "4. CivicPulse — Backend CPU Usage"
     }
+  self-healing-operations.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "id": 5,
+      "panels": [
+        {
+          "title": "Remediation Actions Executed (Success vs Failure)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "sum(rate(civicpulse_ml_remediation_actions_total[5m])) by (action, status)", "legendFormat": "{{ "{{" }}action{{ "}}" }} - {{ "{{" }}status{{ "}}" }}" }
+          ]
+        },
+        {
+          "title": "Time-To-Heal Latency Distribution (Seconds)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum(rate(civicpulse_ml_healing_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95 Time-to-Heal" }
+          ]
+        },
+        {
+          "title": "Circuit Breaker Active State (1 = OPEN)",
+          "type": "stat",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "civicpulse_ml_circuit_breaker_status", "legendFormat": "{{ "{{" }}target_workload{{ "}}" }}" }
+          ]
+        },
+        {
+          "title": "Total Alertmanager Webhook Volume",
+          "type": "stat",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "civicpulse_ml_alert_webhooks_total", "legendFormat": "Webhook Calls" }
+          ]
+        }
+      ],
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["civicpulse", "self-healing", "predictive"],
+      "title": "5. CivicPulse — Self-Healing & Predictive Operations"
+    }
 {{- end }}
+

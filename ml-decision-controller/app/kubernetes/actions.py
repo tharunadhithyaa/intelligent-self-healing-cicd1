@@ -2,7 +2,7 @@
 CivicPulseAI — Kubernetes Remediation Action Handler
 ===================================================
 Executes active Kubernetes remediation routines including deployment rollout restarts,
-replica scaling, and Argo CD Application zero-commit rollback patches.
+replica scaling (up and down), pod status queries, and Argo CD Application zero-commit rollback patches.
 """
 
 import logging
@@ -123,7 +123,8 @@ class KubernetesActionHandler:
                 "mode": "dry-run",
                 "action": "SCALE",
                 "target": f"Deployment/{name}",
-                "message": f"[DRY-RUN] Scale triggered for Deployment/{name}"
+                "message": f"[DRY-RUN] Scale triggered for Deployment/{name}",
+                "new_replicas": 2
             }
 
         apps_api = client.AppsV1Api()
@@ -180,6 +181,61 @@ class KubernetesActionHandler:
                 "error": error_msg
             }
 
+    def scale_down_deployment(self, name: str, namespace: str = "civicpulse", scale_by: int = 1, min_replicas: int = 1) -> Dict[str, Any]:
+        """
+        Scales down a Deployment's replica count by scale_by down to min_replicas limit.
+        """
+        logger.info(f"Executing scale-down action on Deployment/{name} in namespace '{namespace}' (scale_by={scale_by}, min={min_replicas})...")
+
+        if not self.k8s_client_loaded:
+            logger.info(f"[DRY-RUN] Would scale down Deployment/{name} by {scale_by} (min {min_replicas})")
+            return {
+                "success": True,
+                "mode": "dry-run",
+                "action": "SCALE_DOWN",
+                "target": f"Deployment/{name}",
+                "message": f"[DRY-RUN] Scale-down triggered for Deployment/{name}",
+                "new_replicas": min_replicas
+            }
+
+        apps_api = client.AppsV1Api()
+        try:
+            dep = apps_api.read_namespaced_deployment(name, namespace)
+            current_replicas = dep.spec.replicas or 1
+
+            if current_replicas <= min_replicas:
+                msg = f"Deployment/{name} already at min replica limit ({current_replicas}/{min_replicas}). No scale-down change applied."
+                logger.info(msg)
+                return {
+                    "success": True,
+                    "mode": "live",
+                    "action": "SCALE_DOWN",
+                    "target": f"Deployment/{name}",
+                    "message": msg,
+                    "current_replicas": current_replicas,
+                    "new_replicas": current_replicas
+                }
+
+            new_replicas = max(current_replicas - scale_by, min_replicas)
+            dep.spec.replicas = new_replicas
+            apps_api.patch_namespaced_deployment(name, namespace, dep)
+
+            msg = f"Scaled down Deployment/{name} from {current_replicas} to {new_replicas} replicas (min={min_replicas})"
+            logger.info(msg)
+            return {
+                "success": True,
+                "mode": "live",
+                "action": "SCALE_DOWN",
+                "target": f"Deployment/{name}",
+                "message": msg,
+                "previous_replicas": current_replicas,
+                "new_replicas": new_replicas
+            }
+        except Exception as e:
+            error_msg = f"Error scaling down Deployment/{name}: {str(e)}"
+            logger.error(error_msg)
+            return {"success": False, "mode": "live", "action": "SCALE_DOWN", "target": f"Deployment/{name}", "error": error_msg}
+
     def rollback_application(self, app_name: str = "civicpulse", target_namespace: str = "argocd", target_build: Optional[int] = None) -> Dict[str, Any]:
         """
         Executes a zero-commit rollback by patching the Argo CD Application parameters
@@ -198,10 +254,9 @@ class KubernetesActionHandler:
             }
 
         custom_api = client.CustomObjectsApi()
-        apps_api = client.AppsV1Api()
 
         try:
-            # 1. Try to read live Argo CD Application custom resource
+            # Try to read live Argo CD Application custom resource
             app_obj = custom_api.get_namespaced_custom_object(
                 group="argoproj.io",
                 version="v1alpha1",
@@ -217,7 +272,6 @@ class KubernetesActionHandler:
                 if p.get("name") == "backend.image.tag":
                     current_backend_tag = p.get("value")
 
-            # Determine rollback tag
             if target_build is not None:
                 rollback_tag = str(target_build)
             elif current_backend_tag and current_backend_tag.isdigit():
@@ -226,9 +280,8 @@ class KubernetesActionHandler:
             else:
                 rollback_tag = "latest"
 
-            logger.info(f"Targeting rollback to build tag '{rollback_tag}' for Application/{app_name} (current tag: '{current_backend_tag}')")
+            logger.info(f"Targeting rollback to build tag '{rollback_tag}' for Application/{app_name}")
 
-            # Patch Argo CD Application custom resource with previous tag
             patch_body = {
                 "spec": {
                     "source": {
@@ -251,26 +304,6 @@ class KubernetesActionHandler:
                 body=patch_body
             )
 
-            # Trigger Argo CD refresh annotation
-            try:
-                anno_patch = {
-                    "metadata": {
-                        "annotations": {
-                            "argocd.argoproj.io/refresh": "normal"
-                        }
-                    }
-                }
-                custom_api.patch_namespaced_custom_object(
-                    group="argoproj.io",
-                    version="v1alpha1",
-                    namespace=target_namespace,
-                    plural="applications",
-                    name=app_name,
-                    body=anno_patch
-                )
-            except Exception as e_anno:
-                logger.warning(f"Could not annotate Argo CD Application for refresh: {e_anno}")
-
             msg = f"Argo CD Application '{app_name}' successfully patched to image tag '{rollback_tag}'"
             logger.info(msg)
             return {
@@ -284,7 +317,6 @@ class KubernetesActionHandler:
 
         except ApiException as e:
             logger.warning(f"Argo CD Application CRD access failed ({e.status}: {e.reason}). Falling back to deployment rollout restart...")
-            # Fallback to restarting backend and frontend deployments
             res_b = self.restart_workload("civicpulse-backend", namespace="civicpulse")
             res_f = self.restart_workload("civicpulse-frontend", namespace="civicpulse")
             return {
@@ -304,3 +336,36 @@ class KubernetesActionHandler:
                 "target": f"Application/{app_name}",
                 "error": error_msg
             }
+
+    def get_workload_status(self, name: str, namespace: str = "civicpulse", kind: str = "Deployment") -> Dict[str, Any]:
+        """Queries workload status and pod readiness."""
+        if not self.k8s_client_loaded:
+            return {"ready": True, "replicas": 1, "ready_replicas": 1, "message": "[DRY-RUN] Workload ready"}
+
+        apps_api = client.AppsV1Api()
+        try:
+            if kind.lower() == "statefulset":
+                sts = apps_api.read_namespaced_stateful_set(name, namespace)
+                desired = sts.spec.replicas or 1
+                ready = sts.status.ready_replicas or 0
+                return {
+                    "ready": ready >= desired,
+                    "replicas": desired,
+                    "ready_replicas": ready,
+                    "message": f"StatefulSet/{name} {ready}/{desired} ready"
+                }
+            else:
+                dep = apps_api.read_namespaced_deployment(name, namespace)
+                desired = dep.spec.replicas or 1
+                ready = dep.status.ready_replicas or 0
+                updated = dep.status.updated_replicas or 0
+                is_ready = (ready >= desired) and (updated >= desired)
+                return {
+                    "ready": is_ready,
+                    "replicas": desired,
+                    "ready_replicas": ready,
+                    "updated_replicas": updated,
+                    "message": f"Deployment/{name} {ready}/{desired} ready, {updated} updated"
+                }
+        except Exception as e:
+            return {"ready": False, "error": str(e), "message": f"Error querying status for {kind}/{name}: {e}"}

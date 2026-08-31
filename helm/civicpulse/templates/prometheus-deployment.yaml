@@ -120,6 +120,91 @@ data:
             annotations:
               summary: "Storage PVC volume {{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} almost full"
               description: "Volume usage exceeded 85% capacity."
+
+          - alert: PrometheusCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total{pod=~"civicpulse-prometheus.*"}[5m]) * 60 > 1
+            for: 1m
+            labels:
+              severity: critical
+              app.kubernetes.io/component: prometheus
+            annotations:
+              summary: "Prometheus Deployment is crash looping"
+              description: "Prometheus container restarted repeatedly."
+
+          - alert: AlertmanagerDown
+            expr: up{job="civicpulse-alertmanager"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              app.kubernetes.io/component: alertmanager
+            annotations:
+              summary: "Alertmanager service down"
+              description: "Alertmanager health probe unreachable."
+
+          - alert: GrafanaUnhealthy
+            expr: up{job="civicpulse-grafana"} == 0
+            for: 1m
+            labels:
+              severity: warning
+              app.kubernetes.io/component: grafana
+            annotations:
+              summary: "Grafana visualization service unhealthy"
+              description: "Grafana pod health check failed."
+
+          - alert: NginxUnhealthy
+            expr: up{job="civicpulse-nginx"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              app.kubernetes.io/component: nginx
+            annotations:
+              summary: "Nginx ingress proxy service down"
+              description: "Nginx reverse proxy health probe failed."
+
+          - alert: OOMKilled
+            expr: kube_pod_container_status_terminated_reason{reason="OOMKilled"} > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Container OOMKilled on pod {{ "{{" }} $labels.pod {{ "}}" }}"
+              description: "Container exceeded RAM memory limits and was terminated by kernel OOM killer."
+
+          - alert: ImagePullBackOff
+            expr: kube_pod_container_status_waiting_reason{reason=~"ImagePullBackOff|ErrImagePull"} > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Image pull failed on pod {{ "{{" }} $labels.pod {{ "}}" }}"
+              description: "Container image download failed or bad tag specified."
+
+          - alert: NodeDiskPressure
+            expr: kube_node_status_condition{condition="DiskPressure",status="true"} > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubernetes Node experiencing disk pressure"
+              description: "Node disk space critically low."
+
+          - alert: ReadinessProbeFlapping
+            expr: changes(kube_pod_status_ready{condition="true"}[15m]) > 5
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Readiness probe flapping on pod {{ "{{" }} $labels.pod {{ "}}" }}"
+              description: "Pod readiness state changed frequently over last 15m."
+
+          - alert: ConfigMapSecretFailure
+            expr: kube_pod_container_status_waiting_reason{reason=~"CreateContainerConfigError|CreateContainerError"} > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "ConfigMap or Secret missing for pod {{ "{{" }} $labels.pod {{ "}}" }}"
+              description: "Container creation failed due to missing volume configuration."
 ---
 {{- if .Values.monitoring.prometheus.persistence.enabled }}
 apiVersion: v1

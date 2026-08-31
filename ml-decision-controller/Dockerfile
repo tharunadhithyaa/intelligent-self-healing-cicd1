@@ -25,6 +25,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     openssl-provider-legacy
 
 COPY --from=builder /install /usr/local
+
+# Cache-busting argument to force rebuild of app layer without re-installing dependencies
+ARG CACHE_DATE=1
 COPY app/ /app/app/
 
 RUN addgroup --gid 10001 appgroup && \
