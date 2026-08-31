@@ -10,8 +10,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libc-dev
 
 COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --prefix=/install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install --upgrade pip setuptools && \
+    pip install --prefix=/install --no-compile --retries 5 --timeout 60 -r requirements.txt
 
 FROM python:3.12-slim AS runner
 
