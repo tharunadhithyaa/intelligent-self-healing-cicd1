@@ -1309,6 +1309,30 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
         }
 
         // ══════════════════════════════════════════════════════════════════════
+        // STAGE 10.7 — Pre-Deployment Cluster Health & Self-Healing Gate
+        // ══════════════════════════════════════════════════════════════════════
+        stage('Pre-Deployment Cluster Health Gate') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 10.7 — Pre-Deployment Cluster Health & Self-Healing\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                script {
+                    if (isUnix()) {
+                        sh '''
+                            chmod +x jenkins/scripts/pre-deploy-self-heal.sh
+                            ./jenkins/scripts/pre-deploy-self-heal.sh
+                        '''
+                    } else {
+                        bat '''
+                            powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { bash jenkins/scripts/pre-deploy-self-heal.sh }"
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
         // STAGE 11 — Trigger Argo CD Deployment (Zero-Commit Parameter Overrides)
         // ══════════════════════════════════════════════════════════════════════
         stage('Deploy via Argo CD') {

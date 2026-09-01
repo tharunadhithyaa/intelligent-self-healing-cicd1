@@ -41,6 +41,14 @@ HEALTH_ENDPOINTS = {
         "http://civicpulse-grafana:3000/api/health",
         "http://civicpulse-grafana.civicpulse.svc.cluster.local:3000/api/health"
     ],
+    "civicpulse-frontend": [
+        "http://civicpulse-frontend:80/",
+        "http://civicpulse-frontend.civicpulse.svc.cluster.local:80/"
+    ],
+    "civicpulse-ml-decision-controller": [
+        "http://civicpulse-ml-decision-controller:5000/health",
+        "http://civicpulse-ml-decision-controller.civicpulse.svc.cluster.local:5000/health"
+    ],
     "civicpulse-nginx": [
         "http://civicpulse-nginx:80/health",
         "http://civicpulse-nginx.civicpulse.svc.cluster.local:80/"

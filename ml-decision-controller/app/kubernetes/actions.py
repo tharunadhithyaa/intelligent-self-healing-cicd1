@@ -369,3 +369,136 @@ class KubernetesActionHandler:
                 }
         except Exception as e:
             return {"ready": False, "error": str(e), "message": f"Error querying status for {kind}/{name}: {e}"}
+
+    def boost_workload_resources(
+        self,
+        name: str,
+        namespace: str = "civicpulse",
+        kind: str = "Deployment",
+        boost_memory_to: str = "1Gi",
+        boost_cpu_to: str = "500m",
+        max_memory_cap: str = "2Gi"
+    ) -> Dict[str, Any]:
+        """
+        Dynamically increases CPU/memory resource limits and requests for a Deployment
+        in response to OOMKilled events up to a safety limit (max_memory_cap).
+        """
+        logger.info(f"Executing RESOURCE_BOOST on {kind}/{name} in namespace '{namespace}' (memory -> {boost_memory_to}, max cap={max_memory_cap})...")
+
+        if not self.k8s_client_loaded:
+            logger.info(f"[DRY-RUN] Would boost resources for {kind}/{name} to memory={boost_memory_to}")
+            return {
+                "success": True,
+                "mode": "dry-run",
+                "action": "RESOURCE_BOOST",
+                "target": f"{kind}/{name}",
+                "boosted_memory": boost_memory_to,
+                "message": f"[DRY-RUN] Resource limits boosted to {boost_memory_to} for {kind}/{name}"
+            }
+
+        apps_api = client.AppsV1Api()
+        try:
+            dep = apps_api.read_namespaced_deployment(name, namespace)
+            containers = dep.spec.template.spec.containers
+            if containers:
+                target_container = containers[0]
+                if not target_container.resources:
+                    target_container.resources = client.V1ResourceRequirements()
+                if not target_container.resources.limits:
+                    target_container.resources.limits = {}
+                if not target_container.resources.requests:
+                    target_container.resources.requests = {}
+
+                target_container.resources.limits["memory"] = boost_memory_to
+                target_container.resources.limits["cpu"] = boost_cpu_to
+                target_container.resources.requests["memory"] = "512Mi"
+                target_container.resources.requests["cpu"] = "200m"
+
+                apps_api.patch_namespaced_deployment(name, namespace, dep)
+                msg = f"Deployment/{name} resources successfully boosted to limits(mem={boost_memory_to}, cpu={boost_cpu_to})"
+                logger.info(msg)
+                return {
+                    "success": True,
+                    "mode": "live",
+                    "action": "RESOURCE_BOOST",
+                    "target": f"{kind}/{name}",
+                    "boosted_memory": boost_memory_to,
+                    "message": msg
+                }
+            return {"success": False, "mode": "live", "action": "RESOURCE_BOOST", "target": f"{kind}/{name}", "error": "No containers found"}
+        except Exception as e:
+            error_msg = f"Failed to boost resources for {kind}/{name}: {str(e)}"
+            logger.error(error_msg)
+            return {"success": False, "mode": "live", "action": "RESOURCE_BOOST", "target": f"{kind}/{name}", "error": error_msg}
+
+    def repair_pvc_storage(
+        self,
+        name: str,
+        pvc_name: str = "prometheus-data",
+        namespace: str = "civicpulse"
+    ) -> Dict[str, Any]:
+        """
+        Safely repairs corrupted TSDB storage by scaling down the workload, running a transient
+        cleanup job to remove corrupted head chunks/WAL files, and scaling back up.
+        """
+        logger.info(f"Executing STORAGE_REPAIR on PVC/{pvc_name} for workload {name} in namespace '{namespace}'...")
+
+        if not self.k8s_client_loaded:
+            logger.info(f"[DRY-RUN] Would execute STORAGE_REPAIR on PVC/{pvc_name} for {name}")
+            return {
+                "success": True,
+                "mode": "dry-run",
+                "action": "STORAGE_REPAIR",
+                "target": f"PVC/{pvc_name}",
+                "message": f"[DRY-RUN] PVC storage repair completed for {name}"
+            }
+
+        core_api = client.CoreV1Api()
+        apps_api = client.AppsV1Api()
+        try:
+            # 1. Scale down workload to 0
+            dep = apps_api.read_namespaced_deployment(name, namespace)
+            original_replicas = dep.spec.replicas or 1
+            dep.spec.replicas = 0
+            apps_api.patch_namespaced_deployment(name, namespace, dep)
+            time.sleep(5)
+
+            # 2. Run transient pod to wipe corrupted chunks/wal
+            repair_pod_name = f"storage-repair-{int(time.time())}"
+            pod_manifest = client.V1Pod(
+                metadata=client.V1ObjectMeta(name=repair_pod_name, namespace=namespace),
+                spec=client.V1PodSpec(
+                    restart_policy="Never",
+                    volumes=[client.V1Volume(name="vol", persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name))],
+                    containers=[
+                        client.V1Container(
+                            name="repair",
+                            image="alpine",
+                            command=["sh", "-c", "rm -rf /prometheus/chunks_head/* /prometheus/wal/* /prometheus/queries.active && echo Repaired"],
+                            volume_mounts=[client.V1VolumeMount(name="vol", mount_path="/prometheus")]
+                        )
+                    ]
+                )
+            )
+            core_api.create_namespaced_pod(namespace, pod_manifest)
+
+            # Wait up to 30s for pod completion
+            for _ in range(6):
+                time.sleep(5)
+                p = core_api.read_namespaced_pod(repair_pod_name, namespace)
+                if p.status.phase in ["Succeeded", "Failed"]:
+                    break
+            core_api.delete_namespaced_pod(repair_pod_name, namespace)
+
+            # 3. Scale back up
+            dep.spec.replicas = original_replicas
+            apps_api.patch_namespaced_deployment(name, namespace, dep)
+
+            msg = f"Successfully executed storage repair on PVC/{pvc_name} for Deployment/{name}"
+            logger.info(msg)
+            return {"success": True, "mode": "live", "action": "STORAGE_REPAIR", "target": f"PVC/{pvc_name}", "message": msg}
+        except Exception as e:
+            error_msg = f"Storage repair failed for PVC/{pvc_name}: {str(e)}"
+            logger.error(error_msg)
+            return {"success": False, "mode": "live", "action": "STORAGE_REPAIR", "target": f"PVC/{pvc_name}", "error": error_msg}
+

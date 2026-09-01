@@ -95,13 +95,23 @@ class MLDecisionEngine:
         """
         # Inspect alert labels for explicit service/component label
         for alert in firing_alerts:
-            comp = alert.labels.get("app.kubernetes.io/component") or alert.labels.get("job") or alert.labels.get("service")
-            if comp:
-                if "prometheus" in comp: return "civicpulse-prometheus", "Deployment"
-                if "alertmanager" in comp: return "civicpulse-alertmanager", "Deployment"
-                if "grafana" in comp: return "civicpulse-grafana", "Deployment"
-                if "nginx" in comp: return "civicpulse-nginx", "Deployment"
-                if "mongodb" in comp: return "civicpulse-mongodb", "StatefulSet"
+            comp = (
+                alert.labels.get("app.kubernetes.io/component") or
+                alert.labels.get("job") or
+                alert.labels.get("service") or
+                alert.labels.get("pod") or
+                alert.labels.get("container") or
+                alert.labels.get("workload") or ""
+            ).lower()
+
+            if "prometheus" in comp: return "civicpulse-prometheus", "Deployment"
+            if "alertmanager" in comp: return "civicpulse-alertmanager", "Deployment"
+            if "grafana" in comp: return "civicpulse-grafana", "Deployment"
+            if "nginx" in comp: return "civicpulse-nginx", "Deployment"
+            if "mongodb" in comp: return "civicpulse-mongodb", "StatefulSet"
+            if "frontend" in comp: return "civicpulse-frontend", "Deployment"
+            if "ml-decision-controller" in comp or "decision" in comp: return "civicpulse-ml-decision-controller", "Deployment"
+            if "backend" in comp: return "civicpulse-backend", "Deployment"
 
         # Match alert names
         if "MongoDBDown" in alert_names:
@@ -114,6 +124,10 @@ class MLDecisionEngine:
             return "civicpulse-grafana", "Deployment"
         elif "NginxUnhealthy" in alert_names:
             return "civicpulse-nginx", "Deployment"
+        elif "FrontendUnhealthy" in alert_names:
+            return "civicpulse-frontend", "Deployment"
+        elif "MLControllerUnhealthy" in alert_names:
+            return "civicpulse-ml-decision-controller", "Deployment"
         else:
             return "civicpulse-backend", "Deployment"
 
@@ -169,7 +183,9 @@ class MLDecisionEngine:
 
 
         # Determine Remediation Action based on Escalation Tier & Alert Types
-        is_resource_pressure = any(n in ["HighCpuUsage", "HighMemoryUsage", "OOMKilled", "NodeDiskPressure"] for n in alert_names)
+        is_oom = "OOMKilled" in alert_names
+        is_prom_storage_issue = ("PrometheusCrashLooping" in alert_names) and (failure_count >= 1)
+        is_resource_pressure = any(n in ["HighCpuUsage", "HighMemoryUsage", "NodeDiskPressure"] for n in alert_names)
         is_invalid_image = any(n in ["ImagePullBackOff", "ErrImagePull"] for n in alert_names)
         is_rollback_level = (total_score >= 20.0 or critical_count > 1 or "RollbackRequired" in alert_names or is_invalid_image)
 
@@ -195,6 +211,14 @@ class MLDecisionEngine:
             self._record_decision(log_entry)
             return [log_entry]
 
+        elif is_oom:
+            # Automatic resource boost for OOMKilled events up to 1Gi/2Gi
+            action = "RESOURCE_BOOST"
+            target_key_action = f"{target_key}:RESOURCE_BOOST"
+        elif is_prom_storage_issue and target_workload == "civicpulse-prometheus":
+            # Automatic TSDB storage repair for persistent Prometheus CrashLooping
+            action = "STORAGE_REPAIR"
+            target_key_action = f"{target_key}:STORAGE_REPAIR"
         elif failure_count == 2 or (is_rollback_level and self.allow_auto_rollback):
             # Tier 3 / Rollback Condition
             action = "ROLLBACK"
@@ -242,7 +266,11 @@ class MLDecisionEngine:
                 "message": f"[DRY-RUN] Simulated {action} on {target_workload}"
             }
         else:
-            if action == "ROLLBACK":
+            if action == "RESOURCE_BOOST":
+                exec_res = self.k8s_handler.boost_workload_resources(target_workload, namespace="civicpulse", kind=target_kind, boost_memory_to="1Gi")
+            elif action == "STORAGE_REPAIR":
+                exec_res = self.k8s_handler.repair_pvc_storage(target_workload, pvc_name="prometheus-data", namespace="civicpulse")
+            elif action == "ROLLBACK":
                 exec_res = self.k8s_handler.rollback_application(app_name="civicpulse", target_namespace="argocd")
             elif action == "SCALE":
                 exec_res = self.k8s_handler.scale_deployment(target_workload, namespace="civicpulse", scale_by=1, max_replicas=3)

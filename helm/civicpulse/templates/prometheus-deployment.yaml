@@ -126,7 +126,7 @@ data:
             for: 1m
             labels:
               severity: critical
-              app.kubernetes.io/component: prometheus
+              component: prometheus
             annotations:
               summary: "Prometheus Deployment is crash looping"
               description: "Prometheus container restarted repeatedly."
@@ -136,7 +136,7 @@ data:
             for: 1m
             labels:
               severity: critical
-              app.kubernetes.io/component: alertmanager
+              component: alertmanager
             annotations:
               summary: "Alertmanager service down"
               description: "Alertmanager health probe unreachable."
@@ -146,7 +146,7 @@ data:
             for: 1m
             labels:
               severity: warning
-              app.kubernetes.io/component: grafana
+              component: grafana
             annotations:
               summary: "Grafana visualization service unhealthy"
               description: "Grafana pod health check failed."
@@ -156,10 +156,30 @@ data:
             for: 1m
             labels:
               severity: critical
-              app.kubernetes.io/component: nginx
+              component: nginx
             annotations:
               summary: "Nginx ingress proxy service down"
               description: "Nginx reverse proxy health probe failed."
+
+          - alert: FrontendUnhealthy
+            expr: up{job="civicpulse-frontend"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: frontend
+            annotations:
+              summary: "Frontend Angular web server service down"
+              description: "Frontend web server health check failed."
+
+          - alert: MLControllerUnhealthy
+            expr: up{job="civicpulse-ml-decision-controller"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: ml-decision-controller
+            annotations:
+              summary: "ML Decision Controller service down"
+              description: "Self-healing ML Decision Controller health probe failed."
 
           - alert: OOMKilled
             expr: kube_pod_container_status_terminated_reason{reason="OOMKilled"} > 0
