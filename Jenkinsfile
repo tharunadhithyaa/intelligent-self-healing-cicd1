@@ -1318,15 +1318,19 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                 echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
 
                 script {
-                    if (isUnix()) {
-                        sh '''
-                            chmod +x jenkins/scripts/pre-deploy-self-heal.sh
-                            ./jenkins/scripts/pre-deploy-self-heal.sh
-                        '''
-                    } else {
-                        bat '''
-                            powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { bash jenkins/scripts/pre-deploy-self-heal.sh }"
-                        '''
+                    withCredentials([
+                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
+                    ]) {
+                        if (isUnix()) {
+                            sh '''
+                                chmod +x jenkins/scripts/pre-deploy-self-heal.sh
+                                ./jenkins/scripts/pre-deploy-self-heal.sh --mode pre
+                            '''
+                        } else {
+                            bat '''
+                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { bash jenkins/scripts/pre-deploy-self-heal.sh --mode pre }"
+                            '''
+                        }
                     }
                 }
             }
@@ -1383,12 +1387,12 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
         }
 
         // ══════════════════════════════════════════════════════════════════════
-        // STAGE 12 — Health Verification
+        // STAGE 12 — Health Verification & Post-Deployment Gate
         // ══════════════════════════════════════════════════════════════════════
         stage('Health Verification') {
             steps {
                 echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
-                echo '\033[1;36m  STAGE 12 — Health Verification\033[0m'
+                echo '\033[1;36m  STAGE 12 — Health Verification & Post-Deployment Gate\033[0m'
                 echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
 
                 script {
@@ -1396,6 +1400,22 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                     echo "📋 Health Verification Mode: ${deployMethod}"
                     echo "⏳ Waiting ${STARTUP_WAIT}s for services to initialize..."
                     sleep(time: Integer.parseInt(env.STARTUP_WAIT), unit: 'SECONDS')
+
+                    // Post-deployment cluster health & self-healing verification gate
+                    withCredentials([
+                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
+                    ]) {
+                        if (isUnix()) {
+                            sh '''
+                                chmod +x jenkins/scripts/pre-deploy-self-heal.sh
+                                ./jenkins/scripts/pre-deploy-self-heal.sh --mode post
+                            '''
+                        } else {
+                            bat '''
+                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { bash jenkins/scripts/pre-deploy-self-heal.sh --mode post }"
+                            '''
+                        }
+                    }
 
                     sh 'chmod +x jenkins/scripts/health-check.sh'
                     sh """

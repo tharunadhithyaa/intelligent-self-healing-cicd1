@@ -26,6 +26,17 @@ log_error() { echo -e "${RED}[PRE-DEPLOY-HEAL]${NC} ❌ $*"; }
 
 NAMESPACE="${NAMESPACE:-civicpulse}"
 HEAL_TIMEOUT="${HEAL_TIMEOUT:-120}"
+MODE="${MODE:-pre}"
+
+# Parse CLI arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mode)         MODE="$2"; shift 2 ;;
+        --pre-deploy)   MODE="pre"; shift 1 ;;
+        --post-deploy)  MODE="post"; shift 1 ;;
+        *) shift ;;
+    esac
+done
 
 if [ -z "${KUBECONFIG:-}" ]; then
     if [ -f "${HOME}/.kube/config" ] && [ -r "${HOME}/.kube/config" ]; then
@@ -47,7 +58,21 @@ if ! kubectl get nodes --request-timeout=5s >/dev/null 2>&1; then
     exit 0
 fi
 
-log_info "Scanning cluster workload health in namespace '${NAMESPACE}'..."
+# Ensure namespace exists and GHCR secret is refreshed if credentials are present
+kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply --request-timeout=5s -f - >/dev/null 2>&1 || true
+
+if [ -n "${GHCR_TOKEN:-}" ] && [ -n "${GHCR_USERNAME:-}" ]; then
+    log_info "Ensuring secret 'ghcr-secret' exists in namespace '${NAMESPACE}'..."
+    kubectl create secret docker-registry ghcr-secret \
+        --namespace "${NAMESPACE}" \
+        --docker-server="${GHCR_REGISTRY:-ghcr.io}" \
+        --docker-username="${GHCR_USERNAME}" \
+        --docker-password="${GHCR_TOKEN}" \
+        --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1 || true
+    kubectl patch serviceaccount default -n "${NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}' >/dev/null 2>&1 || true
+fi
+
+log_info "Scanning cluster workload health in namespace '${NAMESPACE}' (Mode: ${MODE})..."
 
 # Helper: Extract structured pod container states using jsonpath
 get_pod_status_lines() {
@@ -100,7 +125,7 @@ while IFS=$'\t' read -r pod_name phase container_info; do
         # Detect ImagePullBackOff / ErrImagePull (UNFIXABLE BY RESTART)
         if [[ "${wreason}" =~ ^(ImagePullBackOff|ErrImagePull|InvalidImageName|ErrImageNeverPull|ImageInspectError)$ ]]; then
             HAS_UNFIXABLE=1
-            UNFIXABLE_MESSAGES+=("Pod: ${pod_name} | Container: ${cname} | Reason: ${wreason} (Image does not exist in registry or GHCR authentication failed)")
+            UNFIXABLE_MESSAGES+=("Pod: ${pod_name} | Container: ${cname} | Reason: ${wreason}")
         # Detect Fixable Issues (CrashLoopBackOff, OOMKilled, Error)
         elif [[ "${wreason}" == "CrashLoopBackOff" ]] || [[ "${treason}" == "OOMKilled" ]] || [ "${restarts:-0}" -gt 0 ]; then
             HAS_FIXABLE=1
@@ -108,20 +133,29 @@ while IFS=$'\t' read -r pod_name phase container_info; do
     done
 done <<< "${POD_LINES}"
 
-# 3. Handle Unfixable Image Pull Failures (FAIL FAST)
+# 3. Handle Image Pull Failures based on Pipeline Mode (pre vs post)
 if [ "${HAS_UNFIXABLE}" -eq 1 ]; then
-    echo -e "\n${RED}============================================================================${NC}"
-    echo -e "${RED}${BOLD}❌ FATAL PRE-DEPLOYMENT BLOCKER DETECTED (NON-REMEDIABLE IMAGE ERROR)${NC}"
-    echo -e "${RED}============================================================================${NC}"
-    for msg in "${UNFIXABLE_MESSAGES[@]}"; do
-        echo -e "${RED}  • ${msg}${NC}"
-    done
-    echo -e "${RED}----------------------------------------------------------------------------${NC}"
-    echo -e "${RED}Self-healing cannot resolve missing images or registry auth failures by restarting.${NC}"
-    echo -e "${RED}Failing fast immediately without waiting for ${HEAL_TIMEOUT}s timeout.${NC}"
-    echo -e "${RED}Please verify image build, tag parameters, and GHCR login secrets.${NC}"
-    echo -e "${RED}============================================================================${NC}\n"
-    exit 1
+    if [ "${MODE}" = "pre" ]; then
+        log_warn "Detected existing pod(s) with ImagePullBackOff prior to deployment:"
+        for msg in "${UNFIXABLE_MESSAGES[@]}"; do
+            echo -e "${YELLOW}  • ${msg}${NC}"
+        done
+        log_info "Proceeding to Stage 11 (Deploy via Argo CD) to apply new image tag '${BUILD_NUMBER:-latest}'..."
+    else
+        # Post-deployment mode: Image pull error on NEW deployment -> FAIL FAST!
+        echo -e "\n${RED}============================================================================${NC}"
+        echo -e "${RED}${BOLD}❌ FATAL POST-DEPLOYMENT BLOCKER DETECTED (NON-REMEDIABLE IMAGE ERROR)${NC}"
+        echo -e "${RED}============================================================================${NC}"
+        for msg in "${UNFIXABLE_MESSAGES[@]}"; do
+            echo -e "${RED}  • ${msg}${NC}"
+        done
+        echo -e "${RED}----------------------------------------------------------------------------${NC}"
+        echo -e "${RED}The newly deployed image failed to pull from GHCR (Image missing or auth failed).${NC}"
+        echo -e "${RED}Self-healing cannot resolve missing images or registry auth failures by restarting.${NC}"
+        echo -e "${RED}Failing fast immediately.${NC}"
+        echo -e "${RED}============================================================================${NC}\n"
+        exit 1
+    fi
 fi
 
 # 4. Trigger Self-Healing for Fixable Problems
