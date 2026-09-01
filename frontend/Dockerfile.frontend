@@ -17,10 +17,11 @@ COPY . .
 RUN npm run build -- --configuration production
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:1.27-alpine
 
-# Perform OS security updates and remove default nginx static assets
+# Perform OS security updates, upgrade libexpat/OS packages, and remove default nginx static assets
 RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache --upgrade expat libexpat || true && \
     rm -rf /usr/share/nginx/html/*
 
 # Copy custom nginx configuration for frontend routing fallback

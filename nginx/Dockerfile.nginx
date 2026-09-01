@@ -4,7 +4,7 @@ FROM nginx:1.27-alpine
 # Perform security updates and install libcap for non-root user 'nginx'
 RUN --mount=type=cache,target=/var/cache/apk \
     apk update && apk upgrade --no-cache && \
-    apk add --no-cache libcap && \
+    apk add --no-cache --upgrade expat libexpat libcap || apk add --no-cache libcap && \
     setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
     touch /var/run/nginx.pid && \
     chown -R nginx:nginx /var/run/nginx.pid /var/cache/nginx /var/log/nginx
