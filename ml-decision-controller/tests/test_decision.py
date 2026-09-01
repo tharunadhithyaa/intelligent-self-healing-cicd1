@@ -112,3 +112,28 @@ def test_broader_alerts_imagepull_rollback(engine):
 
     decisions = engine.process_alerts(payload)
     assert decisions[0].remediation_action == "ROLLBACK"
+
+def test_imagepull_non_remediable_after_failure(engine):
+    target = "civicpulse-backend"
+    engine.cooldown_store.reset_cooldown()
+    engine.cooldown_store.increment_failure_count(target) # failure_count = 1
+
+    payload = AlertManagerPayload(
+        status="firing",
+        alerts=[AlertItem(status="firing", labels={"alertname": "ImagePullBackOff", "severity": "critical"})]
+    )
+
+    decisions = engine.process_alerts(payload)
+    assert decisions[0].remediation_action == "NONE"
+    assert decisions[0].circuit_breaker_state == "OPEN"
+
+def test_statefulset_resource_boost(mock_k8s_handler):
+    res = mock_k8s_handler.boost_workload_resources(
+        name="civicpulse-mongodb",
+        namespace="civicpulse",
+        kind="StatefulSet",
+        boost_memory_to="1Gi"
+    )
+    assert res["success"] is True
+    assert res["target"] == "StatefulSet/civicpulse-mongodb"
+

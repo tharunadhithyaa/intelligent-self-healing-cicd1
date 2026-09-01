@@ -398,8 +398,12 @@ class KubernetesActionHandler:
 
         apps_api = client.AppsV1Api()
         try:
-            dep = apps_api.read_namespaced_deployment(name, namespace)
-            containers = dep.spec.template.spec.containers
+            if kind.lower() == "statefulset":
+                workload = apps_api.read_namespaced_stateful_set(name, namespace)
+            else:
+                workload = apps_api.read_namespaced_deployment(name, namespace)
+
+            containers = workload.spec.template.spec.containers
             if containers:
                 target_container = containers[0]
                 if not target_container.resources:
@@ -414,8 +418,12 @@ class KubernetesActionHandler:
                 target_container.resources.requests["memory"] = "512Mi"
                 target_container.resources.requests["cpu"] = "200m"
 
-                apps_api.patch_namespaced_deployment(name, namespace, dep)
-                msg = f"Deployment/{name} resources successfully boosted to limits(mem={boost_memory_to}, cpu={boost_cpu_to})"
+                if kind.lower() == "statefulset":
+                    apps_api.patch_namespaced_stateful_set(name, namespace, workload)
+                else:
+                    apps_api.patch_namespaced_deployment(name, namespace, workload)
+
+                msg = f"{kind}/{name} resources successfully boosted to limits(mem={boost_memory_to}, cpu={boost_cpu_to})"
                 logger.info(msg)
                 return {
                     "success": True,

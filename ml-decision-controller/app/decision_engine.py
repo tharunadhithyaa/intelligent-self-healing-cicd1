@@ -189,6 +189,27 @@ class MLDecisionEngine:
         is_invalid_image = any(n in ["ImagePullBackOff", "ErrImagePull"] for n in alert_names)
         is_rollback_level = (total_score >= 20.0 or critical_count > 1 or "RollbackRequired" in alert_names or is_invalid_image)
 
+        # Non-remediable image pull error guard (if failure count >= 1 or rollback already failed)
+        if is_invalid_image and failure_count >= 1:
+            self.cooldown_store.set_circuit_breaker_state(target_key, "OPEN")
+            reason = f"Image pull error (ImagePullBackOff / ErrImagePull) on {target_workload} cannot be resolved by automatic pod restarts. Opening circuit breaker."
+            logger.error(reason)
+            log_entry = self._create_decision_log(
+                alert_names=alert_names,
+                namespace="civicpulse",
+                target_workload=target_workload,
+                target_kind=target_kind,
+                remediation_action="NONE",
+                severity_score=total_score,
+                reason=reason,
+                execution_success=False,
+                escalation_tier=failure_count,
+                circuit_breaker_state="OPEN",
+                details={"non_remediable_image_pull": True}
+            )
+            self._record_decision(log_entry)
+            return [log_entry]
+
         # Multi-Tier Escalation Mapping
         if failure_count >= CIRCUIT_BREAKER_MAX_FAILURES:
             # Escalated past max failures -> Open circuit breaker

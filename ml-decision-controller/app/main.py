@@ -78,6 +78,7 @@ def get_metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/api/v1/alerts", response_model=DecisionResponse, status_code=status.HTTP_200_OK)
+@app.post("/api/v1/webhook", response_model=DecisionResponse, status_code=status.HTTP_200_OK)
 @DECISION_LATENCY_HISTOGRAM.time()
 async def receive_alerts(payload: AlertManagerPayload, request: Request):
     """
