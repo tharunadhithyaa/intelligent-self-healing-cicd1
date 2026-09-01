@@ -130,11 +130,11 @@ monitoring:
       size: 1Gi
     resources:
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 200m
+        memory: 512Mi
       limits:
-        cpu: 300m
-        memory: 256Mi
+        cpu: 500m
+        memory: 1Gi
 
   grafana:
     enabled: true
