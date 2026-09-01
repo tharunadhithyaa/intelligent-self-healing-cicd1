@@ -1318,17 +1318,19 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                 echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
 
                 script {
+                    env.FRESH_IMAGES_PUSHED = 'true'
                     withCredentials([
                         usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
                     ]) {
                         if (isUnix()) {
                             sh '''
                                 chmod +x jenkins/scripts/pre-deploy-self-heal.sh
-                                ./jenkins/scripts/pre-deploy-self-heal.sh --mode pre
+                                export FRESH_IMAGES_PUSHED=true
+                                ./jenkins/scripts/pre-deploy-self-heal.sh --mode pre --fresh-images-pushed
                             '''
                         } else {
                             bat '''
-                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { bash jenkins/scripts/pre-deploy-self-heal.sh --mode pre }"
+                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { $env:FRESH_IMAGES_PUSHED='true'; bash jenkins/scripts/pre-deploy-self-heal.sh --mode pre --fresh-images-pushed }"
                             '''
                         }
                     }

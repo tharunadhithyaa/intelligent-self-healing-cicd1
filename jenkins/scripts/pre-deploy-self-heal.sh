@@ -27,13 +27,16 @@ log_error() { echo -e "${RED}[PRE-DEPLOY-HEAL]${NC} ❌ $*"; }
 NAMESPACE="${NAMESPACE:-civicpulse}"
 HEAL_TIMEOUT="${HEAL_TIMEOUT:-120}"
 MODE="${MODE:-pre}"
+FRESH_IMAGES_PUSHED="${FRESH_IMAGES_PUSHED:-true}"
 
-# Parse CLI arguments
+# ── Parse CLI Arguments ────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mode)         MODE="$2"; shift 2 ;;
-        --pre-deploy)   MODE="pre"; shift 1 ;;
-        --post-deploy)  MODE="post"; shift 1 ;;
+        --mode)                 MODE="$2"; shift 2 ;;
+        --pre-deploy)           MODE="pre"; shift 1 ;;
+        --post-deploy)          MODE="post"; shift 1 ;;
+        --fresh-images-pushed)  FRESH_IMAGES_PUSHED="true"; shift 1 ;;
+        --no-fresh-images-pushed) FRESH_IMAGES_PUSHED="false"; shift 1 ;;
         *) shift ;;
     esac
 done
@@ -72,7 +75,7 @@ if [ -n "${GHCR_TOKEN:-}" ] && [ -n "${GHCR_USERNAME:-}" ]; then
     kubectl patch serviceaccount default -n "${NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}' >/dev/null 2>&1 || true
 fi
 
-log_info "Scanning cluster workload health in namespace '${NAMESPACE}' (Mode: ${MODE})..."
+log_info "Scanning cluster workload health in namespace '${NAMESPACE}' (Mode: ${MODE}, FreshImagesPushed: ${FRESH_IMAGES_PUSHED})..."
 
 # Helper: Extract structured pod container states using jsonpath
 get_pod_status_lines() {
@@ -133,26 +136,40 @@ while IFS=$'\t' read -r pod_name phase container_info; do
     done
 done <<< "${POD_LINES}"
 
-# 3. Handle Image Pull Failures based on Pipeline Mode (pre vs post)
+# 3. Decision Logic: Evaluate Image Pull Errors
+#
+# DECISION RULE:
+# - In PRE-DEPLOY mode when FRESH_IMAGES_PUSHED=true:
+#   Fresh container images (tag ${BUILD_NUMBER}) were just successfully built and pushed to GHCR in Stage 9.
+#   Any existing ImagePullBackOff is on OLD pods from a previous release.
+#   Stage 11 will apply parameter overrides (image.tag=${BUILD_NUMBER}) to Argo CD, which will terminate
+#   old pods and replace them with the fresh image.
+#   -> Report as WARNING and PROCEED to Stage 11 to avoid pre-deployment gate deadlock.
+#
+# - In POST-DEPLOY mode OR when FRESH_IMAGES_PUSHED=false:
+#   Argo CD has already deployed the new image tag ${BUILD_NUMBER}. If ImagePullBackOff occurs now,
+#   it means the NEW deployment itself failed to pull from GHCR (missing tag or auth failure).
+#   -> FAIL FAST immediately (exit 1).
 if [ "${HAS_UNFIXABLE}" -eq 1 ]; then
-    if [ "${MODE}" = "pre" ]; then
-        log_warn "Detected existing pod(s) with ImagePullBackOff prior to deployment:"
+    if [ "${MODE}" = "pre" ] && [ "${FRESH_IMAGES_PUSHED}" = "true" ]; then
+        log_warn "Pre-deployment health gate detected existing pod(s) with ImagePullBackOff (old release tag):"
         for msg in "${UNFIXABLE_MESSAGES[@]}"; do
             echo -e "${YELLOW}  • ${msg}${NC}"
         done
-        log_info "Proceeding to Stage 11 (Deploy via Argo CD) to apply new image tag '${BUILD_NUMBER:-latest}'..."
+        log_ok "Fresh container images for build tag '${BUILD_NUMBER:-latest}' were pushed to GHCR in Stage 9."
+        log_info "Proceeding to Stage 11 (Deploy via Argo CD) so Argo CD can apply image tag '${BUILD_NUMBER:-latest}' and replace old pods..."
     else
-        # Post-deployment mode: Image pull error on NEW deployment -> FAIL FAST!
         echo -e "\n${RED}============================================================================${NC}"
-        echo -e "${RED}${BOLD}❌ FATAL POST-DEPLOYMENT BLOCKER DETECTED (NON-REMEDIABLE IMAGE ERROR)${NC}"
+        echo -e "${RED}${BOLD}❌ FATAL DEPLOYMENT BLOCKER DETECTED (NON-REMEDIABLE IMAGE ERROR)${NC}"
         echo -e "${RED}============================================================================${NC}"
         for msg in "${UNFIXABLE_MESSAGES[@]}"; do
             echo -e "${RED}  • ${msg}${NC}"
         done
         echo -e "${RED}----------------------------------------------------------------------------${NC}"
-        echo -e "${RED}The newly deployed image failed to pull from GHCR (Image missing or auth failed).${NC}"
+        echo -e "${RED}Mode: ${MODE} | FreshImagesPushed: ${FRESH_IMAGES_PUSHED}${NC}"
+        echo -e "${RED}Container image failed to pull from GHCR (Image missing or auth failed).${NC}"
         echo -e "${RED}Self-healing cannot resolve missing images or registry auth failures by restarting.${NC}"
-        echo -e "${RED}Failing fast immediately.${NC}"
+        echo -e "${RED}Failing fast immediately without waiting for ${HEAL_TIMEOUT}s timeout.${NC}"
         echo -e "${RED}============================================================================${NC}\n"
         exit 1
     fi
