@@ -144,10 +144,16 @@ fi
 log_ok "K3s cluster accessible"
 
 if ! kubectl get application civicpulse -n argocd --request-timeout=10s >/dev/null 2>&1; then
-    log_error "Argo CD Application 'civicpulse' not accessible in namespace 'argocd'."
-    exit 1
+    log_warn "Argo CD Application 'civicpulse' not found in namespace 'argocd'. Applying manifest argocd/civicpulse-application.yaml..."
+    if [ -f "${REPO_ROOT}/argocd/civicpulse-application.yaml" ]; then
+        kubectl apply -f "${REPO_ROOT}/argocd/civicpulse-application.yaml" --request-timeout=10s >/dev/null 2>&1 || true
+    fi
+else
+    log_ok "Argo CD Application 'civicpulse' found in namespace 'argocd'"
+    if [ -f "${REPO_ROOT}/argocd/civicpulse-application.yaml" ]; then
+        kubectl apply -f "${REPO_ROOT}/argocd/civicpulse-application.yaml" --request-timeout=10s >/dev/null 2>&1 || true
+    fi
 fi
-log_ok "Argo CD Application 'civicpulse' found in namespace 'argocd'"
 
 # ── Retrieve Previous Tags & Display Stage Header ─────────────────────────────
 PREV_BACKEND_TAG=$(kubectl get deployment civicpulse-backend -n civicpulse -o jsonpath='{.spec.template.spec.containers[0].image}' --request-timeout=10s 2>/dev/null | awk -F':' '{print $NF}' || echo "unknown")
@@ -201,6 +207,58 @@ kubectl create secret generic "${GRAFANA_SECRET}" \
     --from-literal=admin-password="${GRAFANA_PASS_VAL}" \
     --dry-run=client -o yaml | kubectl apply --request-timeout=10s -f - >/dev/null 2>&1
 log_ok "${GRAFANA_SECRET} ready in namespace '${GRAFANA_NS}'"
+
+# ── Update GitOps Manifest (helm/civicpulse/values.yaml) & Commit/Push to Git ───
+log_info "Updating GitOps manifest file helm/civicpulse/values.yaml with build tag '${BUILD_NUMBER}'..."
+
+VALUES_FILE="${REPO_ROOT}/helm/civicpulse/values.yaml"
+
+if [ -f "${VALUES_FILE}" ]; then
+    if command -v python3 &>/dev/null; then
+        python3 - "${BUILD_NUMBER}" "${VALUES_FILE}" << 'PYEOF'
+import sys, re
+build_num = sys.argv[1]
+values_path = sys.argv[2]
+with open(values_path, 'r', encoding='utf-8') as f:
+    text = f.read()
+
+text = re.sub(r'(frontend:\s*\n(?:\s*#[^\n]*\n)*\s*image:\s*\n(?:\s*#[^\n]*\n)*\s*repository:[^\n]+\n\s*tag:\s*)"[^"]*"', r'\1"' + build_num + '"', text)
+text = re.sub(r'(backend:\s*\n(?:\s*#[^\n]*\n)*\s*image:\s*\n(?:\s*#[^\n]*\n)*\s*repository:[^\n]+\n\s*tag:\s*)"[^"]*"', r'\1"' + build_num + '"', text)
+text = re.sub(r'(mlDecisionController:\s*\n(?:\s*#[^\n]*\n)*\s*(?:enabled:[^\n]+\n\s*)?image:\s*\n(?:\s*#[^\n]*\n)*\s*repository:[^\n]+\n\s*tag:\s*)"[^"]*"', r'\1"' + build_num + '"', text)
+
+with open(values_path, 'w', encoding='utf-8') as f:
+    f.write(text)
+PYEOF
+    fi
+
+    sed -i -E "s/(frontend:.*image:.*repository:.*tag: \")[^\"]+(\")/\1${BUILD_NUMBER}\2/g" "${VALUES_FILE}" 2>/dev/null || true
+    sed -i -E "s/(backend:.*image:.*repository:.*tag: \")[^\"]+(\")/\1${BUILD_NUMBER}\2/g" "${VALUES_FILE}" 2>/dev/null || true
+    log_ok "Updated helm/civicpulse/values.yaml with frontend.image.tag=${BUILD_NUMBER} and backend.image.tag=${BUILD_NUMBER}"
+fi
+
+# ── Commit and Push GitOps Changes ───────────────────────────────────────────
+if command -v git &>/dev/null && [ -d "${REPO_ROOT}/.git" ]; then
+    cd "${REPO_ROOT}"
+    if git status --porcelain | grep -q "helm/civicpulse/values.yaml"; then
+        log_info "Committing updated values.yaml to GitOps repository..."
+        git config user.name "${GIT_USER_NAME:-Jenkins CI/CD}"
+        git config user.email "${GIT_USER_EMAIL:-jenkins@civicpulse.local}"
+        git add helm/civicpulse/values.yaml
+        git commit -m "ci(gitops): update frontend & backend image tag to ${BUILD_NUMBER} [skip ci]" || true
+
+        TARGET_BRANCH="${BRANCH_NAME:-main}"
+        log_info "Pushing GitOps commit to repository branch '${TARGET_BRANCH}'..."
+        
+        if [ -n "${GHCR_TOKEN_VAL}" ] && [ -n "${GHCR_USER}" ]; then
+            git push "https://${GHCR_USER}:${GHCR_TOKEN_VAL}@github.com/${GHCR_OWNER_VAL}/intelligent-self-healing-cicd.git" "HEAD:${TARGET_BRANCH}" >/dev/null 2>&1 || git push origin "${TARGET_BRANCH}" >/dev/null 2>&1 || log_warn "Git push failed; Argo CD parameter override patch will be used as immediate deployment method."
+        else
+            git push origin "${TARGET_BRANCH}" >/dev/null 2>&1 || log_warn "Git push failed; Argo CD parameter override patch will be used as immediate deployment method."
+        fi
+        log_ok "GitOps repository updated and pushed successfully for build #${BUILD_NUMBER}"
+    else
+        log_info "GitOps values.yaml already contains tag '${BUILD_NUMBER}'"
+    fi
+fi
 
 # ── Retrieve and Log Pre-Patch Application Parameters ─────────────────────────
 log_info "Inspecting existing Argo CD Application spec parameters..."

@@ -41,6 +41,10 @@ spec:
         app.kubernetes.io/component: grafana
         app.kubernetes.io/part-of: civicpulse-monitoring
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsUser: 472
         fsGroup: 472

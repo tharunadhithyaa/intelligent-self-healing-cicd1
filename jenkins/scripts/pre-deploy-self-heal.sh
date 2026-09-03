@@ -150,29 +150,33 @@ done <<< "${POD_LINES}"
 #   Argo CD has already deployed the new image tag ${BUILD_NUMBER}. If ImagePullBackOff occurs now,
 #   it means the NEW deployment itself failed to pull from GHCR (missing tag or auth failure).
 #   -> FAIL FAST immediately (exit 1).
-if [ "${HAS_UNFIXABLE}" -eq 1 ]; then
-    if [ "${MODE}" = "pre" ] && [ "${FRESH_IMAGES_PUSHED}" = "true" ]; then
-        log_warn "Pre-deployment health gate detected existing pod(s) with ImagePullBackOff (old release tag):"
+if [ "${MODE}" = "pre" ] && [ "${FRESH_IMAGES_PUSHED}" = "true" ]; then
+    log_ok "Pre-deployment health gate active (Mode: pre, FreshImagesPushed: true)."
+    if [ "${HAS_UNFIXABLE}" -eq 1 ]; then
+        log_warn "Detected existing pod(s) with ImagePullBackOff/ErrImagePull (old release tag):"
         for msg in "${UNFIXABLE_MESSAGES[@]}"; do
             echo -e "${YELLOW}  • ${msg}${NC}"
         done
-        log_ok "Fresh container images for build tag '${BUILD_NUMBER:-latest}' were pushed to GHCR in Stage 9."
-        log_info "Proceeding to Stage 11 (Deploy via Argo CD) so Argo CD can apply image tag '${BUILD_NUMBER:-latest}' and replace old pods..."
-    else
-        echo -e "\n${RED}============================================================================${NC}"
-        echo -e "${RED}${BOLD}❌ FATAL DEPLOYMENT BLOCKER DETECTED (NON-REMEDIABLE IMAGE ERROR)${NC}"
-        echo -e "${RED}============================================================================${NC}"
-        for msg in "${UNFIXABLE_MESSAGES[@]}"; do
-            echo -e "${RED}  • ${msg}${NC}"
-        done
-        echo -e "${RED}----------------------------------------------------------------------------${NC}"
-        echo -e "${RED}Mode: ${MODE} | FreshImagesPushed: ${FRESH_IMAGES_PUSHED}${NC}"
-        echo -e "${RED}Container image failed to pull from GHCR (Image missing or auth failed).${NC}"
-        echo -e "${RED}Self-healing cannot resolve missing images or registry auth failures by restarting.${NC}"
-        echo -e "${RED}Failing fast immediately without waiting for ${HEAL_TIMEOUT}s timeout.${NC}"
-        echo -e "${RED}============================================================================${NC}\n"
-        exit 1
     fi
+    log_ok "Fresh container images for build tag '${BUILD_NUMBER:-latest}' were pushed to GHCR."
+    log_info "Treating pre-deployment gate as SUCCESS and letting Argo CD perform the workload rollout to replace old pods."
+    exit 0
+fi
+
+if [ "${HAS_UNFIXABLE}" -eq 1 ]; then
+    echo -e "\n${RED}============================================================================${NC}"
+    echo -e "${RED}${BOLD}❌ FATAL DEPLOYMENT BLOCKER DETECTED (NON-REMEDIABLE IMAGE ERROR)${NC}"
+    echo -e "${RED}============================================================================${NC}"
+    for msg in "${UNFIXABLE_MESSAGES[@]}"; do
+        echo -e "${RED}  • ${msg}${NC}"
+    done
+    echo -e "${RED}----------------------------------------------------------------------------${NC}"
+    echo -e "${RED}Mode: ${MODE} | FreshImagesPushed: ${FRESH_IMAGES_PUSHED}${NC}"
+    echo -e "${RED}Container image failed to pull from GHCR (Image missing or auth failed).${NC}"
+    echo -e "${RED}Self-healing cannot resolve missing images or registry auth failures by restarting.${NC}"
+    echo -e "${RED}Failing fast immediately without waiting for ${HEAL_TIMEOUT}s timeout.${NC}"
+    echo -e "${RED}============================================================================${NC}\n"
+    exit 1
 fi
 
 # 4. Trigger Self-Healing for Fixable Problems

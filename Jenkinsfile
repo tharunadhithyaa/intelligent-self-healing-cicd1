@@ -1364,7 +1364,16 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                         usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN'),
                         string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')
                     ]) {
-                        sh './jenkins/scripts/update-gitops.sh --build-number ${BUILD_NUMBER}'
+                        if (isUnix()) {
+                            sh '''
+                                export BRANCH_NAME="${BRANCH_NAME:-main}"
+                                ./jenkins/scripts/update-gitops.sh --build-number ${BUILD_NUMBER}
+                            '''
+                        } else {
+                            bat '''
+                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/update-gitops.sh) { $env:BRANCH_NAME='%BRANCH_NAME%'; bash jenkins/scripts/update-gitops.sh --build-number %BUILD_NUMBER% }"
+                            '''
+                        }
                     }
 
 

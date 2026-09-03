@@ -347,6 +347,10 @@ spec:
         app.kubernetes.io/part-of: civicpulse-monitoring
     spec:
       serviceAccountName: civicpulse-prometheus
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: prometheus
           image: "{{ .Values.monitoring.prometheus.image.repository }}:{{ .Values.monitoring.prometheus.image.tag }}"
