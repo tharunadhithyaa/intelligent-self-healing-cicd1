@@ -435,7 +435,26 @@ echo -e "${CYAN}  TEST 6 — Circuit Breaker & Metrics Observability        ${NC
 echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
 
 # Query metrics endpoint
-METRICS_RESP=$(curl -s "${CONTROLLER_URL}/metrics" 2>/dev/null || echo "")
+PROBE_URL="${CONTROLLER_URL}/metrics"
+current_ml_pod=$(get_ml_pod)
+log_info "Probing ML Decision Controller metrics endpoint URL: ${PROBE_URL} (Active Pod: ${current_ml_pod:-none})..."
+
+METRICS_RESP=""
+if [ -n "${current_ml_pod}" ]; then
+    METRICS_RESP=$(kubectl exec "${current_ml_pod}" -n "${NAMESPACE}" -- python -c "
+import urllib.request
+try:
+    with urllib.request.urlopen('http://localhost:5000/metrics', timeout=10) as resp:
+        print(resp.read().decode('utf-8'))
+except Exception as e:
+    pass
+" 2>/dev/null || echo "")
+fi
+
+if [ -z "${METRICS_RESP}" ]; then
+    METRICS_RESP=$(curl -s --max-time 10 "${PROBE_URL}" 2>/dev/null || echo "")
+fi
+
 log_info "Controller Metrics Probe Length: ${#METRICS_RESP} bytes"
 
 TEST6_STATUS="FAIL"
@@ -444,7 +463,7 @@ if echo "${METRICS_RESP}" | grep -q 'civicpulse_ml_remediation_actions_total' ||
     TEST6_STATUS="PASS"
     PASSED_TESTS=$((PASSED_TESTS + 1))
 else
-    log_error "TEST 6 FAILED: Controller metrics endpoint failed to serve valid telemetry"
+    log_error "TEST 6 FAILED: Controller metrics endpoint failed to serve valid telemetry (Probed URL: ${PROBE_URL})"
 fi
 
 # Final Cleanup

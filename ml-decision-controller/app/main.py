@@ -50,6 +50,13 @@ CIRCUIT_BREAKER_STATUS_GAUGE = Gauge(
     ["target_workload"]
 )
 
+# Pre-initialize metric gauges and counters for default workloads so /metrics serves complete telemetry from startup
+for target in ["civicpulse-backend", "civicpulse-frontend", "civicpulse-nginx", "civicpulse-mongodb"]:
+    CIRCUIT_BREAKER_STATUS_GAUGE.labels(target_workload=target).set(0.0)
+
+for action_type in ["RESTART", "SCALE", "ROLLBACK"]:
+    DECISION_ACTIONS_TOTAL.labels(action=action_type, target_workload="civicpulse-backend", status="success", result="success").inc(0)
+
 engine = MLDecisionEngine()
 
 @app.get("/health", status_code=status.HTTP_200_OK)

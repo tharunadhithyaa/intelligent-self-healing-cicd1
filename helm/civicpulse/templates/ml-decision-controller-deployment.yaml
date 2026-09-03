@@ -16,6 +16,10 @@ spec:
       app.kubernetes.io/component: ml-decision-controller
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.mlDecisionController.service.port | default 5000 }}"
+        prometheus.io/path: "/metrics"
       labels:
         {{- include "civicpulse.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: ml-decision-controller
