@@ -179,7 +179,7 @@ mlDecisionController:
   enabled: true
   image:
     repository: ghcr.io/tharunadhithyaa/civicpulse-ml-decision-controller
-    tag: "447"
+    tag: "latest"
     pullPolicy: Always
   replicas: 1
   service:
