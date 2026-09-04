@@ -684,7 +684,7 @@ const runAiChatServiceTests = (isDbConnected: boolean) =>
         testUser._id.toString(),
         "222222222222222222222222",
       );
-    } catch (e) {
+    } catch {
       notFoundErrorThrown = true;
     }
 

@@ -24,7 +24,7 @@ describe('WorkerDashboardComponent', () => {
             ],
             total: 1,
           },
-        })
+        }),
       ),
       updateJobStatus: vi.fn().mockReturnValue(
         of({
@@ -36,7 +36,7 @@ describe('WorkerDashboardComponent', () => {
               status: 'in_progress',
             },
           },
-        })
+        }),
       ),
     };
 
@@ -86,7 +86,7 @@ describe('WorkerDashboardComponent', () => {
     expect(mockFieldWorkerService.updateJobStatus).toHaveBeenCalledWith(
       'job1',
       'in_progress',
-      'Field Responder initialized status: in_progress'
+      'Field Responder initialized status: in_progress',
     );
   });
 
@@ -101,7 +101,7 @@ describe('WorkerDashboardComponent', () => {
     expect(mockFieldWorkerService.updateJobStatus).toHaveBeenCalledWith(
       'job1',
       'resolved',
-      'Completed repair'
+      'Completed repair',
     );
   });
 

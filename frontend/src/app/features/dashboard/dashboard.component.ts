@@ -678,9 +678,7 @@ export class DashboardComponent implements OnInit {
 
     // Sort by timestamp descending and take the top 5
     const sortedList = [...list];
-    sortedList.sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-    );
+    sortedList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return sortedList.slice(0, 5);
   });
 }

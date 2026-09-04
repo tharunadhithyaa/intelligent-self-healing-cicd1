@@ -48,7 +48,8 @@ describe('MarkdownPipe', () => {
     });
 
     it('should strip onerror, onload, and onclick event attributes', () => {
-      const payload = '<img src="x" onerror="alert(1)"> <svg onload="alert(2)"> <b onclick="alert(3)">click</b>';
+      const payload =
+        '<img src="x" onerror="alert(1)"> <svg onload="alert(2)"> <b onclick="alert(3)">click</b>';
       const result = pipe.transform(payload);
       expect(result).not.toContain('onerror');
       expect(result).not.toContain('onload');
@@ -68,7 +69,8 @@ describe('MarkdownPipe', () => {
     });
 
     it('should remove iframe, object, and embed elements', () => {
-      const payload = '<iframe src="https://evil.com"></iframe><object data="evil.swf"></object><embed src="evil.swf">';
+      const payload =
+        '<iframe src="https://evil.com"></iframe><object data="evil.swf"></object><embed src="evil.swf">';
       const result = pipe.transform(payload);
       expect(result).not.toContain('<iframe');
       expect(result).not.toContain('<object');
@@ -76,4 +78,3 @@ describe('MarkdownPipe', () => {
     });
   });
 });
-
