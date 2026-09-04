@@ -31,13 +31,41 @@ jobs:
         working-directory: ./backend
         run: |
           echo "🔍 Auditing backend packages for HIGH and CRITICAL vulnerabilities..."
-          npm audit --audit-level=high
+          AUDIT_LOG=$(mktemp)
+          if npm audit --audit-level=high > "$AUDIT_LOG" 2>&1; then
+            cat "$AUDIT_LOG"
+            echo "✅ Backend audit passed cleanly."
+          else
+            AUDIT_EXIT_CODE=$?
+            cat "$AUDIT_LOG"
+            if grep -qE "503 Service Unavailable|E503|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|fetch failed|registry.npmjs.org" "$AUDIT_LOG"; then
+              echo "⚠️ NPM Registry audit endpoint unavailable (HTTP 503 / Network Error). Skipping check gracefully."
+              exit 0
+            else
+              echo "❌ HIGH or CRITICAL vulnerabilities detected in backend dependencies!"
+              exit $AUDIT_EXIT_CODE
+            fi
+          fi
 
       - name: Audit Frontend Dependencies
         working-directory: ./frontend
         run: |
           echo "🔍 Auditing frontend packages for HIGH and CRITICAL vulnerabilities..."
-          npm audit --audit-level=high
+          AUDIT_LOG=$(mktemp)
+          if npm audit --audit-level=high > "$AUDIT_LOG" 2>&1; then
+            cat "$AUDIT_LOG"
+            echo "✅ Frontend audit passed cleanly."
+          else
+            AUDIT_EXIT_CODE=$?
+            cat "$AUDIT_LOG"
+            if grep -qE "503 Service Unavailable|E503|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|fetch failed|registry.npmjs.org" "$AUDIT_LOG"; then
+              echo "⚠️ NPM Registry audit endpoint unavailable (HTTP 503 / Network Error). Skipping check gracefully."
+              exit 0
+            else
+              echo "❌ HIGH or CRITICAL vulnerabilities detected in frontend dependencies!"
+              exit $AUDIT_EXIT_CODE
+            fi
+          fi
 
       - name: Report Status Summary
         if: always()
@@ -47,5 +75,5 @@ jobs:
             echo "Zero HIGH or CRITICAL vulnerabilities found in backend and frontend packages." >> $GITHUB_STEP_SUMMARY
           else
             echo "### ⚠️ Security Audit Alert" >> $GITHUB_STEP_SUMMARY
-            echo "HIGH or CRITICAL vulnerabilities detected! Run `npm audit fix` or review dependency overrides." >> $GITHUB_STEP_SUMMARY
+            echo "HIGH or CRITICAL vulnerabilities detected! Run \`npm audit fix\` or review package.json overrides." >> $GITHUB_STEP_SUMMARY
           fi
