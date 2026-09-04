@@ -1482,7 +1482,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
         // ══════════════════════════════════════════════════════════════════════
         // STAGE 12.7 — Verify ML Decision Controller
         // ══════════════════════════════════════════════════════════════════════
-        stage('12.7 Verify ML Decision Controller') {
+        stage('Verify ML Decision Controller') {
             steps {
                 echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
                 echo '\033[1;36m  STAGE 12.7 — Verify ML Decision Controller\033[0m'
