@@ -365,11 +365,7 @@ ENVEOF
                     steps {
                         echo '🔎 Running backend static analysis...'
                         dir('backend') {
-                            // npm audit — advisory only, don't fail the build
-                            sh '''
-                                echo "  📋 npm audit (advisory)..."
-                                npm audit --audit-level=high || echo "  ⚠️  Audit found vulnerabilities (advisory — non-blocking)"
-                            '''
+                            // Note: npm audit moved to automated security audit job (.github/workflows/security-audit.yml) to optimize pipeline speed
                             // ESLint
                             sh '''
                                 echo "  📋 ESLint..."
@@ -386,10 +382,7 @@ ENVEOF
                     steps {
                         echo '🔎 Running frontend static analysis...'
                         dir('frontend') {
-                            sh '''
-                                echo "  📋 npm audit (advisory)..."
-                                npm audit --audit-level=high || echo "  ⚠️  Audit found vulnerabilities (advisory — non-blocking)"
-                            '''
+                            // Note: npm audit moved to automated security audit job (.github/workflows/security-audit.yml) to optimize pipeline speed
                             // Prettier format check
                             sh '''
                                 echo "  📋 Prettier format check..."

@@ -1,0 +1,51 @@
+name: Security & Vulnerability Audit
+
+on:
+  schedule:
+    # Run daily at 02:00 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    name: Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Audit Backend Dependencies
+        working-directory: ./backend
+        run: |
+          echo "🔍 Auditing backend packages for HIGH and CRITICAL vulnerabilities..."
+          npm audit --audit-level=high
+
+      - name: Audit Frontend Dependencies
+        working-directory: ./frontend
+        run: |
+          echo "🔍 Auditing frontend packages for HIGH and CRITICAL vulnerabilities..."
+          npm audit --audit-level=high
+
+      - name: Report Status Summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "### ✅ Security Audit Passed" >> $GITHUB_STEP_SUMMARY
+            echo "Zero HIGH or CRITICAL vulnerabilities found in backend and frontend packages." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Security Audit Alert" >> $GITHUB_STEP_SUMMARY
+            echo "HIGH or CRITICAL vulnerabilities detected! Run `npm audit fix` or review dependency overrides." >> $GITHUB_STEP_SUMMARY
+          fi
