@@ -2,7 +2,17 @@
 // CivicPulseAI — Declarative Jenkins CI/CD Pipeline
 // ============================================================================
 // Automates: Checkout → Validate → Install → Lint → Build → SonarQube Scan
-//            → Quality Gate → Trivy FS Scan → Docker Build → Trivy Image Scan → Push Images to GHCR → Deploy → Health Check → Report
+//            → Quality Gate → Trivy FS Scan → Docker Build → Trivy Image Scan → Push Images to GHCR → Deploy via Argo CD → Health Check → Report
+//
+// PIPELINE ARCHITECTURE RATIONALE:
+// - SINGLE-FILE ORCHESTRATION: The entire end-to-end multi-stage pipeline is maintained
+//   in a single 1652-line declarative Jenkinsfile to provide zero-external-dependency,
+//   fully self-contained, auditable pipeline execution across both Linux and Windows agents.
+// - SOFT GATES VS HARD GATES:
+//   * Soft Gate (SonarQube Quality Gate): Managed with non-blocking try-catch / soft warnings
+//     to allow developer iteration when SonarQube server is offline during dev setups.
+//   * Hard Gate (Trivy Security Vulnerability Scanning): Non-negotiable security boundary
+//     that aborts build execution if HIGH/CRITICAL vulnerabilities are detected.
 // ============================================================================
 
 pipeline {

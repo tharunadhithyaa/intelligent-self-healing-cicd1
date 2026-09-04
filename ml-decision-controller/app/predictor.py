@@ -1,11 +1,16 @@
 """
 CivicPulseAI — Resource Predictor & Proactive Scaling Engine
 ============================================================
-Queries Prometheus metric time-series and applies linear regression forecasting to
-trigger proactive SCALE remediations before hard 80%/85% alert thresholds are breached.
+Queries Prometheus metric time-series and applies linear regression forecasting (y = m*x + c)
+to trigger proactive SCALE remediations before hard alert thresholds (80%/85%) are breached.
 
-Filters noise by requiring >= 5 time-series data points and sustained trend thresholds.
-Supports conservative scale-down when load stays consistently low for >10 minutes.
+MATHEMATICAL MODEL & DESIGN RATIONALE:
+- Simple Linear Regression (via NumPy/SciPy `polyfit`) was chosen over complex deep learning:
+  1. High Interpretability: Deterministic linear slope (m) and offset (c) allow exact operational auditing.
+  2. Zero Cold-Start Overhead: No offline dataset training, GPUs, or heavy model weight files required.
+  3. Real-Time Latency: Microsecond evaluation fitting 15-minute sliding Prometheus metrics windows.
+- Filters noise by requiring >= 5 time-series data points and sustained positive slope trends.
+- Supports conservative scale-down when CPU/Memory load stays consistently low for >10 minutes.
 """
 
 import logging

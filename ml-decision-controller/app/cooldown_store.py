@@ -6,9 +6,12 @@ across microservice pod restarts.
 
 Supported Backends (controlled by COOLDOWN_STORE_TYPE env var):
 1. ConfigMap (Default K8s backend) — Uses optimistic locking (resourceVersion) + retry backoff.
-2. Redis — Uses Redis key-value store if REDIS_URL/REDIS_HOST is configured.
+   - Trade-off: Ideal for zero-dependency local/demo deployment. Under high multi-replica
+     alert concurrency, ConfigMap updates can encounter API server rate limits.
+2. Redis — Recommended for Production (set REDIS_URL or REDIS_HOST).
+   - High-throughput atomic key-value operations with sub-millisecond latency.
 3. MongoDB — Uses PyMongo collection if MONGODB_URI is configured.
-4. Memory — Local in-memory fallback.
+4. Memory — Local in-memory fallback for testing.
 """
 
 import json

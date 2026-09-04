@@ -6,7 +6,16 @@
 # directly to the 'civicpulse' Argo CD Application in Kubernetes.
 # Executed by Jenkinsfile Stage 11 (Deploy via Argo CD).
 #
-# ZERO GIT COMMITS ARE CREATED BY THIS SCRIPT.
+# ARCHITECTURAL PATTERN & TRADE-OFF RATIONALE:
+# - ZERO GIT COMMITS: This script applies live parameter overrides via
+#   `kubectl patch application civicpulse -n argocd`.
+# - WHY PREVENT GIT COMMITS? Because Jenkins Poll SCM monitors git branches.
+#   If Jenkins pushed image tag commits back to Git during build execution,
+#   it would trigger recursive, infinite CI pipeline build loops.
+# - GITOPS TRADE-OFF: This "Parameter Override" pattern prioritizes demo safety
+#   and fast feedback loops over pure GitOps strictness. If the Argo CD
+#   Application CRD is deleted and re-created from raw git manifests without
+#   parameters, live override tags revert to manifest default ('latest').
 # ============================================================================
 set -euo pipefail
 

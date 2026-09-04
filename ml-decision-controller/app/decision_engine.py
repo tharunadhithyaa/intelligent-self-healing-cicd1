@@ -1,9 +1,19 @@
 """
-CivicPulseAI — ML Decision Engine
-=================================
-Evaluates firing Prometheus Alertmanager alerts, computes dynamic severity scores,
-enforces persistent action cooldowns & circuit breakers, maps alerts to target workloads,
-triggers automated remediations, and performs closed-loop runtime verification.
+CivicPulseAI — Decision Engine & Remediation Controller
+=========================================================
+Executes autonomous self-healing via a dual-path control model:
+
+1. REACTIVE HEALING PATH:
+   - Dynamic Alert Severity Scoring (LEVEL_SCORES + ALERT_SEVERITY_SCORES).
+   - Target Workload Resolution across microservice deployments.
+   - Multi-Tier Escalation State Machine (RESTART -> SCALE -> ROLLBACK) based on failure counts.
+   - Circuit Breaker Protection (pauses actions after max consecutive failures).
+   - Closed-Loop Runtime Verification (Kubernetes rollout status & endpoint HTTP health probes).
+
+2. PREDICTIVE HEALING PATH:
+   - Evaluated when no critical reactive alerts are firing.
+   - Queries Prometheus metric time-series and applies Linear Regression forecasting (NumPy/SciPy).
+   - Triggers proactive workload scaling BEFORE hard alert thresholds are breached.
 """
 
 import logging

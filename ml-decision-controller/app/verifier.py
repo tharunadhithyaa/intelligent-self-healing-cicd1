@@ -20,7 +20,7 @@ from typing import Tuple, Dict, Optional, Any
 
 logger = logging.getLogger("ml_decision_controller.verifier")
 
-DEFAULT_VERIFICATION_TIMEOUT = 90  # seconds
+DEFAULT_VERIFICATION_TIMEOUT = 120  # seconds (configurable via VERIFICATION_TIMEOUT_SECONDS env var)
 
 # Target workload health probe endpoints (in-cluster DNS or fallback)
 HEALTH_ENDPOINTS = {

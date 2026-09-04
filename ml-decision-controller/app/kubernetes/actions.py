@@ -446,8 +446,15 @@ class KubernetesActionHandler:
         namespace: str = "civicpulse"
     ) -> Dict[str, Any]:
         """
+        LAST RESORT REMEDIATION ACTION — TSDB Storage Repair.
         Safely repairs corrupted TSDB storage by scaling down the workload, running a transient
         cleanup job to remove corrupted head chunks/WAL files, and scaling back up.
+
+        SAFETY GUARDRAILS & RISK MITIGATION:
+        - Target Restricted: Only executed for 'civicpulse-prometheus'.
+        - Failure Tier Gated: Requires failure_count >= 1 (simple restart must have already failed).
+        - Cooldown Enforced: Governed by 300s persistent cooldown store key to prevent repetitive wipes.
+        - Destructive Scope: Removes corrupted WAL / head chunks while preserving existing blocks.
         """
         logger.info(f"Executing STORAGE_REPAIR on PVC/{pvc_name} for workload {name} in namespace '{namespace}'...")
 
