@@ -956,7 +956,9 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                         def mlControllerLocal  = "${env.DOCKER_IMAGE_PREFIX}/ml-decision-controller:${env.IMAGE_TAG}"
 
                         def backendGhcrTag     = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-backend:${env.IMAGE_TAG}"
+                        def backendGhcrLatest  = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-backend:latest"
                         def frontendGhcrTag    = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-frontend:${env.IMAGE_TAG}"
+                        def frontendGhcrLatest = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-frontend:latest"
                         def nginxGhcrLatest    = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-nginx:latest"
                         def mongodbGhcrLatest  = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-mongodb:latest"
                         def mlControllerGhcrTag = "${env.GHCR_REGISTRY}/${env.GHCR_OWNER}/civicpulse-ml-decision-controller:${env.IMAGE_TAG}"
@@ -976,9 +978,11 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo "  ✅ Logged in to GHCR successfully"
 
                                 echo ""
-                                echo "🏷️ Tagging container images for GHCR (backend/frontend/mlController: ${env.IMAGE_TAG}, mongodb/nginx/mlController: latest)..."
+                                echo "🏷️ Tagging container images for GHCR (backend/frontend/mlController: ${env.IMAGE_TAG} + latest)..."
                                 docker tag ${backendLocal} ${backendGhcrTag}
+                                docker tag ${backendLocal} ${backendGhcrLatest}
                                 docker tag ${frontendLocal} ${frontendGhcrTag}
+                                docker tag ${frontendLocal} ${frontendGhcrLatest}
                                 docker tag ${nginxLocal} ${nginxGhcrLatest}
                                 docker tag ${mongodbLocal} ${mongodbGhcrLatest}
                                 docker tag ${mlControllerLocal} ${mlControllerGhcrTag}
@@ -1065,7 +1069,9 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo ""
                                 echo "🚀 Pushing container images to GHCR..."
                                 push_with_retry "${backendGhcrTag}" || exit 1
+                                push_with_retry "${backendGhcrLatest}" || exit 1
                                 push_with_retry "${frontendGhcrTag}" || exit 1
+                                push_with_retry "${frontendGhcrLatest}" || exit 1
                                 push_with_retry "${nginxGhcrLatest}" || exit 1
                                 push_with_retry "${mongodbGhcrLatest}" || exit 1
                                 push_with_retry "${mlControllerGhcrTag}" || exit 1
@@ -1074,7 +1080,9 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo ""
                                 echo "✅ Successfully pushed container images to GHCR:"
                                 echo "   • ${backendGhcrTag}"
+                                echo "   • ${backendGhcrLatest}"
                                 echo "   • ${frontendGhcrTag}"
+                                echo "   • ${frontendGhcrLatest}"
                                 echo "   • ${nginxGhcrLatest}"
                                 echo "   • ${mongodbGhcrLatest}"
                                 echo "   • ${mlControllerGhcrTag}"
@@ -1089,9 +1097,11 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 echo   ✅ Logged in to GHCR successfully
 
                                 echo.
-                                echo 🏷️ Tagging container images for GHCR (backend/frontend/mlController: ${env.IMAGE_TAG}, mongodb/nginx/mlController: latest)...
+                                echo 🏷️ Tagging container images for GHCR (backend/frontend/mlController: ${env.IMAGE_TAG} + latest)...
                                 docker tag ${backendLocal} ${backendGhcrTag}
+                                docker tag ${backendLocal} ${backendGhcrLatest}
                                 docker tag ${frontendLocal} ${frontendGhcrTag}
+                                docker tag ${frontendLocal} ${frontendGhcrLatest}
                                 docker tag ${nginxLocal} ${nginxGhcrLatest}
                                 docker tag ${mongodbLocal} ${mongodbGhcrLatest}
                                 docker tag ${mlControllerLocal} ${mlControllerGhcrTag}
@@ -1160,7 +1170,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                         Write-Host \"Reason: transient GHCR/network timeout.\"; ^
                                         return \$false; ^
                                     }; ^
-                                    \$images = @('${backendGhcrTag}', '${frontendGhcrTag}', '${nginxGhcrLatest}', '${mongodbGhcrLatest}', '${mlControllerGhcrTag}', '${mlControllerGhcrLatest}'); ^
+                                    \$images = @('${backendGhcrTag}', '${backendGhcrLatest}', '${frontendGhcrTag}', '${frontendGhcrLatest}', '${nginxGhcrLatest}', '${mongodbGhcrLatest}', '${mlControllerGhcrTag}', '${mlControllerGhcrLatest}'); ^
                                     foreach (\$img in \$images) { ^
                                         if (-not (Push-WithRetry \$img)) { exit 1 } ^
                                     } ^
