@@ -30,7 +30,6 @@ WORKDIR /app
 
 # Perform OS security updates, configure npm fetch retries and upgrade global npm/tar
 RUN apk update && apk upgrade --no-cache \
-    && apk add --no-cache wget \
     && npm config set fetch-retries 5 \
     && npm config set fetch-retry-factor 2 \
     && npm config set fetch-retry-mintimeout 10000 \

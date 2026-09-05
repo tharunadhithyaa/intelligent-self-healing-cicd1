@@ -1,10 +1,14 @@
 import mongoose from "mongoose";
+// @ts-ignore
 import bcrypt from "bcrypt";
 import config from "./index";
 import { logger } from "../utils/logger.util";
 import Role from "../models/role.model";
 import User from "../models/user.model";
 import { Permissions } from "../constants/permissions.constants";
+
+declare const process: any;
+declare const setTimeout: any;
 
 const seedDefaultRoles = async (): Promise<void> => {
   try {
@@ -74,7 +78,7 @@ const seedDefaultAdmin = async (): Promise<void> => {
       email: "admin@civicpulse.com",
       password: hashedPassword,
       role: "admin",
-      isEmailVerified: true,
+      isVerified: true,
     });
 
     await defaultAdmin.save();
