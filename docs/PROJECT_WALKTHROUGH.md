@@ -112,7 +112,7 @@ CivicPulse AI extends CI/CD into a **closed-loop feedback system**:
 
 | Category | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | Angular 19, TypeScript, SCSS, RxJS | Web UI for civic management portal |
+| **Frontend** | Angular 22, TypeScript, SCSS, RxJS | Web UI for civic management portal |
 | **Backend** | Node.js, Express, TypeScript | REST API service, authentication, business logic |
 | **Database** | MongoDB 8.0, Mongoose | Persistent document store for application data |
 | **Reverse Proxy** | Nginx | Single point of entry, request routing, static file server |
@@ -353,14 +353,14 @@ intelligent-self-healing-cicd/
 ## 7. Application Architecture
 
 ### Frontend
-* **Framework:** Angular 19 (TypeScript, SCSS, RxJS).
+* **Framework:** Angular 22 (TypeScript, SCSS, RxJS).
 * **Build Process:** Compiled via `npm run build -- --configuration production` into static assets under `dist/`.
-* **Container Environment:** Multi-stage Docker build (`frontend/Dockerfile.frontend`). Stage 1 compiles Angular using Node.js 20; Stage 2 serves assets using `nginx:alpine`.
+* **Container Environment:** Multi-stage Docker build (`frontend/Dockerfile.frontend`). Stage 1 compiles Angular using Node.js 22; Stage 2 serves assets using `nginx:alpine`.
 * **Port:** Container internal port 80. Exposed via Service `civicpulse-frontend` on port 80.
 * **Backend Communication:** Communicates with the backend REST API via relative `/api` paths routed through the Nginx reverse proxy.
 
 ### Backend
-* **Runtime/Framework:** Node.js 20, Express, TypeScript.
+* **Runtime/Framework:** Node.js 22, Express, TypeScript.
 * **APIs & Features:** REST API endpoints handling authentication (JWT Access & Refresh tokens), user management, civic issue reporting, system health checks (`/api/health`), and Prometheus metrics export (`/metrics`).
 * **Container Environment:** Multi-stage Docker build (`backend/Dockerfile.backend`). Stage 1 builds TypeScript to JavaScript (`dist/`); Stage 2 runs production Node server.
 * **Port:** Container internal port 3000. Service `civicpulse-backend` exposes port 3000.

@@ -77,17 +77,17 @@ Once configured, verify that Jenkins is actively polling your Git repository:
 
 ## Branch Filtering & Isolation Architecture
 
-The pipeline enforces strict separation between CI source code changes and GitOps deployment state changes:
+The pipeline enforces strict separation between CI source code monitoring and GitOps deployment state management:
 
-- **CI Branch (`main`)**: Pushed by developers. Monitored strictly by Jenkins **Poll SCM**.
-- **GitOps Branch (`gitops`)**: Pushed automatically by Jenkins upon successful build/test/scan/push. Monitored strictly by **Argo CD**.
+- **Monitored Branch (`main`)**: Pushed by developers and monitored strictly by Jenkins **Poll SCM**.
+- **Zero-Commit GitOps Deployment**: Executed by Stage 11 (`update-gitops.sh --build-number ${BUILD_NUMBER}`). Patches Argo CD application parameter overrides (`backend.image.tag`, `frontend.image.tag`) directly in K3s without creating git commits, eliminating commit churn and preventing infinite build loops.
 
 ### Critical Jenkins UI Setting:
 In Jenkins job settings under **Pipeline → Definition → SCM → Branch Specifier**:
 - **MUST BE SET TO**: `*/main` (or `refs/heads/main`).
-- **DO NOT USE**: `*`, `origin/*`, or `gitops`.
+- **DO NOT USE**: `*` or `origin/*`.
 
-Because Jenkins Poll SCM is restricted to `*/main`, automatic commits pushed to `origin/gitops` by Stage 11 (`update-gitops.sh`) will **never** trigger a new Jenkins build, permanently preventing infinite build loops.
+Because Jenkins Poll SCM is restricted to `*/main` and Stage 11 operates using zero-commit parameter overrides, automated deployment state updates will **never** trigger unwanted Jenkins builds.
 
 ---
 
@@ -102,8 +102,8 @@ Because Jenkins Poll SCM is restricted to `*/main`, automatic commits pushed to 
 - **Fix**: Adjust schedule to `H/5 * * * *` or `H/10 * * * *` to reduce polling frequency.
 
 ### 3. Pipeline Triggering Repeatedly (Infinite Build Loop)
-- **Cause**: Jenkins Job SCM **Branch Specifier** is set to `*` or wildcard, causing Poll SCM to detect commits on the `gitops` branch.
-- **Fix**: Set **Branch Specifier** to `*/main`. Pushing automated GitOps commits to `gitops` will no longer trigger Jenkins CI.
+- **Cause**: Jenkins Job SCM **Branch Specifier** is set to `*` or wildcard instead of `*/main`.
+- **Fix**: Set **Branch Specifier** to `*/main`.
 
 ---
 

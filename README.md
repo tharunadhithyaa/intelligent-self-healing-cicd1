@@ -64,23 +64,23 @@ Automated end-to-end delivery split into 15 distinct execution stages:
 1.  **Checkout Source Code**: Clones source repo and captures git metadata (`GIT_COMMIT_SHORT`, `GIT_AUTHOR`).
 2.  **Environment Validation**: Checks pre-requisites (Docker, Docker Compose, Git, Node, npm) and auto-generates default `.env` files.
 3.  **Install Dependencies**: Installs node modules in parallel (`npm ci`) for backend and frontend.
-4.  **Static Code Validation**: Evaluates code quality (ESLint for backend, Prettier format check for frontend, advisory npm audit).
+4.  **Static Code Validation**: Evaluates code quality (ESLint for backend, Prettier format check for frontend).
 5.  **Build Application**: Compiles Angular client and TypeScript backend in parallel.
-6.  **SonarQube Analysis**: Runs system SonarScanner with dynamic source detection (`backend/src`, `frontend/src`).
-7.  **SonarQube Quality Gate**: Blocks downstream execution if Quality Gate status is not `OK`.
+6.  **Unit Tests & Code Coverage**: Runs backend (Jest + CI MongoDB) and frontend (Vitest) test suites, producing `lcov.info` coverage reports.
+7.  **SonarQube Analysis & Quality Gate**: Runs system SonarScanner with dynamic source detection and waits for Quality Gate evaluation.
 8.  **Trivy Filesystem Scan**: Scans repository source files for HIGH/CRITICAL vulnerabilities before Docker build.
-9.  **Docker Build**: Generates production-ready, size-optimized container images tagged with `${BUILD_NUMBER}`.
-10. **Trivy Image Scan**: Scans all container images and archives vulnerability reports.
-11. **Push Images to GHCR**: Tags and pushes build images (`ghcr.io/tharunadhithyaa/civicpulse-*:tag`) to GitHub Container Registry.
-12. **Deploy via Argo CD**: Zero-commit deployment that patches Argo CD parameters (`image.tag = BUILD_NUMBER`) directly in K3s.
-13. **Verify Self-Healing Controller & Remediations**: Audits real-time K3s cluster health, ML decision controller readiness, and remediation triggers.
-14. **Health Verification**: Layered HTTP endpoint and container probe verifications.
-15. **Deployment Report**: Publishes consolidated build, security, and deployment status reports.
+9.  **Docker Build**: Generates production-ready container images tagged with `${BUILD_NUMBER}`.
+10. **Trivy Image Scan & GHCR Push**: Scans container images and pushes published tags (`ghcr.io/tharunadhithyaa/civicpulse-*:BUILD_NUMBER`) to GitHub Container Registry.
+11. **Apply Argo CD Parameter Override**: Zero-commit stage executing `update-gitops.sh --build-number ${BUILD_NUMBER}` immediately after GHCR image push to patch Argo CD application parameters (`backend.image.tag`, `frontend.image.tag`) directly in K3s.
+12. **Verify Self-Healing Controller & Remediations**: Audits real-time K3s cluster health, ML decision controller readiness, and remediation triggers.
+13. **Health Verification**: Layered HTTP endpoint polling and container probe verifications (`health-check.sh`).
+14. **Monitoring Stack Verification**: Audits Prometheus, Grafana, and Alertmanager endpoint readiness (`verify-monitoring.sh`).
+15. **Publish Deployment & Security Reports**: Publishes consolidated build, security, and deployment audit reports (`generate-report.sh`).
 
-> **Note on Branch Architecture & Poll SCM**:
-> - **`main` Branch**: Pushed by developers. Monitored strictly by Jenkins Poll SCM (`*/main`).
-> - **`gitops` Branch**: Pushed automatically by Jenkins upon successful build. Monitored strictly by Argo CD.
-> - Restricting Poll SCM strictly to `*/main` isolates CI triggers from CD commits, permanently preventing infinite build loops.
+> **Note on Zero-Commit GitOps Architecture & Poll SCM**:
+> - **`main` Branch**: Pushed by developers and monitored by Jenkins Poll SCM (`*/main`).
+> - **Zero-Commit Deployment**: Argo CD parameter overrides are applied live directly to the Argo CD Application resource in K3s without making Git commits, eliminating commit churn and build loops.
+> - Restricting Poll SCM strictly to `*/main` isolates CI triggers and guarantees deterministic pipeline runs.
 
 ### 🛡️ 2. Intelligent Self-Healing Deployments
 The deployment engine executes automated self-recovery procedures to eliminate downtime:

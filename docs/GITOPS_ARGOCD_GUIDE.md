@@ -18,12 +18,12 @@ Jenkins Poll SCM (monitors main branch ONLY)
   ├── Trivy Filesystem Scan
   ├── Docker Build (Tag: ${BUILD_NUMBER})
   ├── Trivy Container Image Scan
-  ├── Push Images to GHCR (ghcr.io/tharunadhithyaa/civicpulse-*:tag)
-  └── Update helm/civicpulse/values.yaml & Commit/Push to GitHub (gitops branch)
+  ├── Push Images to GHCR (ghcr.io/tharunadhithyaa/civicpulse-*:BUILD_NUMBER)
+  └── Apply Argo CD Parameter Override (update-gitops.sh --build-number ${BUILD_NUMBER}) [Zero-Commit Design]
      ↓
-GitOps Desired State Updated on GitHub (gitops branch)
+Argo CD Application Live Parameters Updated in K3s (argocd/civicpulse)
      ↓
-Argo CD Application (argocd/civicpulse-application.yaml, targetRevision: gitops)
+Argo CD Engine (argocd/civicpulse-application.yaml, targetRevision: main)
      ↓
 K3s Cluster (namespace: civicpulse)
   ├── State Sync & Self-Healing
@@ -37,9 +37,9 @@ K3s Cluster (namespace: civicpulse)
 
 ### Responsibility Split
 
-* **Jenkins (CI Engine)**: Source checkout from `main`, testing, SonarQube quality gate, Trivy security scanning, Docker image building, pushing to GHCR, updating `helm/civicpulse/values.yaml` with the current `${BUILD_NUMBER}`, and pushing the GitOps commit to the `gitops` branch.
-* **Argo CD (CD Engine)**: Monitors GitHub repository on branch `gitops` (`helm/civicpulse`), detects desired state changes, renders Helm manifests, synchronizes K3s workloads, enforces self-healing, and reports cluster health.
-* **K3s (Runtime Cluster)**: Runs MongoDB, Backend API, Frontend, and Nginx reverse proxy in the `civicpulse` namespace.
+* **Jenkins (CI Engine)**: Source checkout from `main`, unit testing, SonarQube quality gate, Trivy security scanning, Docker image building, pushing images to GHCR, and executing Stage 11 (`update-gitops.sh --build-number ${BUILD_NUMBER}`) immediately after GHCR push to patch live parameter overrides (`backend.image.tag`, `frontend.image.tag`) directly on the Argo CD Custom Resource without creating Git commits.
+* **Argo CD (CD Engine)**: Monitors GitHub repository on branch `main` (`helm/civicpulse`), applies live parameter overrides, renders Helm manifests, synchronizes K3s workloads, enforces self-healing, and reports cluster health.
+* **K3s (Runtime Cluster)**: Runs MongoDB, Backend API, Frontend, Nginx reverse proxy, and monitoring microservices in the `civicpulse` namespace.
 
 ---
 
@@ -138,32 +138,31 @@ argocd app history civicpulse
 
 To roll back the deployment to a previous known-good Jenkins build number (e.g. from build `228` back to build `227`):
 
-### Method 1: GitOps Commit Revert (Recommended)
-Edit `helm/civicpulse/values.yaml` to change all image tags back to `"227"`:
-
-```yaml
-frontend:
-  image:
-    tag: "227"
-backend:
-  image:
-    tag: "227"
-mongodb:
-  image:
-    tag: "227"
-nginx:
-  image:
-    tag: "227"
-```
-
-Commit and push to GitHub:
+### Method 1: Zero-Commit Argo CD Parameter Override Patch (Recommended)
+Run the GitOps update script specifying the desired target build number:
 
 ```bash
-git commit -am "chore(rollback): revert CivicPulse images to build 227"
-git push origin main
+./jenkins/scripts/update-gitops.sh --build-number 227
 ```
 
-Argo CD will automatically detect the commit and roll back the running containers in K3s.
+Alternatively, apply the parameter override patch directly using `kubectl`:
+
+```bash
+kubectl patch application civicpulse -n argocd --type merge -p '{
+  "spec": {
+    "source": {
+      "helm": {
+        "parameters": [
+          {"name": "frontend.image.tag", "value": "227"},
+          {"name": "backend.image.tag", "value": "227"}
+        ]
+      }
+    }
+  }
+}'
+```
+
+Argo CD will immediately reconcile and roll back the running containers in K3s without creating Git commits!
 
 ### Method 2: Argo CD CLI Rollback
 ```bash

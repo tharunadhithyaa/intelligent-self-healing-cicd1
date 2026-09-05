@@ -15,24 +15,26 @@ flowchart TD
     D --> D2["Frontend: npm ci"]
     D1 --> E["Stage 4: Static Code Validation"]
     D2 --> E
-    E --> E1["Backend: ESLint + npm audit"]
-    E --> E2["Frontend: Prettier + npm audit"]
+    E --> E1["Backend: ESLint"]
+    E --> E2["Frontend: Prettier Check"]
     E1 --> F["Stage 5: Build Application"]
     E2 --> F
     F --> F1["Backend: tsc → dist/"]
     F --> F2["Frontend: ng build --prod"]
-    F1 --> G1["Stage 6: SonarQube Analysis"]
-    F2 --> G1
-    G1 --> G2["Stage 7: SonarQube Quality Gate"]
-    G2 -->|OK| T1["Stage 8: Trivy Filesystem Scan"]
-    G2 -->|FAILED| M["❌ Pipeline Aborted"]
+    F1 --> U["Stage 6: Unit Tests & Code Coverage"]
+    F2 --> U
+    U --> G1["Stage 7: SonarQube Analysis & Quality Gate"]
+    G1 -->|OK| T1["Stage 8: Trivy Filesystem Scan"]
+    G1 -->|FAILED| M["❌ Pipeline Aborted"]
     T1 -->|OK| H["Stage 9: Docker Build"]
     T1 -->|FAILED| M
-    H --> T2["Stage 10: Trivy Image Scan"]
-    T2 -->|OK| I["Stage 11: Deployment"]
+    H --> T2["Stage 10: Trivy Image Scan & GHCR Push"]
+    T2 -->|OK| I["Stage 11: Apply Argo CD Parameter Override (Zero-Commit)"]
     T2 -->|FAILED| M
-    I --> J["Stage 12: Health Verification"]
-    J --> K["Stage 13: Deployment Report"]
+    I --> V["Stage 12: Verify Self-Healing Controller & Remediations"]
+    V --> J["Stage 13: Application Health Verification"]
+    J --> MON["Stage 14: Monitoring Stack Verification"]
+    MON --> K["Stage 15: Publish Deployment & Security Audit Reports"]
     K --> L{"Pipeline Result"}
     L -->|Success| M1["✅ Post: Success Actions"]
     L -->|Failure| M
@@ -55,7 +57,7 @@ flowchart TD
 |------------|-----------------------------------------------|
 | **Tool**   | Git (via Jenkins SCM)                         |
 | **Action** | Clean workspace → Clone repository            |
-| **Output** | `GIT_COMMIT_SHORT`, `GIT_AUTHOR`, `GIT_BRANCH_NAME` |
+| **Output** | `GIT_COMMIT_SHORT`, `GIT_AUTHOR`, `IMAGE_TAG` |
 | **Failure**| Abort pipeline immediately                    |
 
 ### Stage 2 — Environment Validation
@@ -66,7 +68,7 @@ flowchart TD
 | Git                | ✅        | Abort pipeline          |
 | Node.js + npm      | ✅        | Abort pipeline          |
 | Project directories| ✅        | Abort pipeline          |
-| `.env` files       | ⚠️        | Warning only            |
+| `.env` files       | ⚠️        | Warning / Auto-generate |
 | Dockerfiles        | ✅        | Abort pipeline          |
 
 ### Stage 3 — Install Dependencies
@@ -78,7 +80,6 @@ flowchart TD
 ### Stage 4 — Static Code Validation
 | Check          | Tool          | Fail Build? |
 |----------------|---------------|-------------|
-| npm audit      | npm           | ❌ Advisory  |
 | Backend lint   | ESLint        | ⚠️ Warning   |
 | Frontend format| Prettier      | ⚠️ Warning   |
 
@@ -92,21 +93,21 @@ flowchart TD
 
 Build artifacts are archived in Jenkins for historical access.
 
-### Stage 6 — SonarQube Analysis
+### Stage 6 — Unit Tests & Code Coverage
+| Component  | Test Framework | Strategy / DB | Coverage Output |
+|------------|----------------|---------------|-----------------|
+| Backend    | Jest           | Ephemeral MongoDB container (`civicpulse-ci-mongodb:27017`) | `backend/coverage/lcov.info` |
+| Frontend   | Vitest         | Standalone component testing | `frontend/coverage/lcov.info` |
+
+> Enforces lcov report presence; fails pipeline if reports are missing.
+
+### Stage 7 — SonarQube Analysis & Quality Gate
 | Parameter / Tool       | Configuration / Detail                                   |
 |------------------------|----------------------------------------------------------|
 | Scanner Execution      | `withSonarQubeEnv('SonarQube')`                          |
 | Auto-Detection         | Dynamic `src` folder discovery (`backend/src`, `frontend/src`) |
-| Platform Compatibility | Linux Docker (`sh`), Windows (`bat`)                     |
+| Quality Gate Wait      | `waitForQualityGate()`                                   |
 | Exclusions             | `node_modules`, `dist`, `coverage`, `logs`, Docker files |
-
-### Stage 7 — SonarQube Quality Gate
-| Parameter / Step       | Detail                                                   |
-|------------------------|----------------------------------------------------------|
-| Step Function          | `waitForQualityGate()`                                   |
-| Timeout                | `45 MINUTES`                                             |
-| Failure Handling       | Throws error & aborts pipeline if status != `OK`          |
-| Pass Requirement       | Continues to Stage 8 only on `OK` status                 |
 
 ### Stage 8 — Trivy Filesystem Scan
 | Action                 | Detail                                                   |
@@ -120,48 +121,53 @@ Build artifacts are archived in Jenkins for historical access.
 | Action                 | Command / Detail                              |
 |------------------------|-----------------------------------------------|
 | Prune dangling images  | `docker image prune -f`                       |
-| Build images           | `docker compose build [--no-cache] --pull`    |
-| Image static tags      | `civicpulse/backend:v1`, `frontend:v1`, etc.  |
+| Build images           | `docker compose build [--no-cache] --parallel`|
+| Build Tags             | `civicpulse/*:${BUILD_NUMBER}`                |
 
-### Stage 10 — Trivy Image Scan
+### Stage 10 — Trivy Image Scan & GHCR Push
 | Action                 | Detail                                                   |
 |------------------------|----------------------------------------------------------|
-| Targets Scanned        | `civicpulse/backend:v1`, `civicpulse/frontend:v1`, `civicpulse/nginx:v1`, `civicpulse/mongodb:v1` |
-| Severity Levels        | `HIGH,CRITICAL` (`--ignore-unfixed`)                     |
-| Reports Generated      | HTML, JSON, SARIF (`jenkins/reports/trivy/trivy-*-*`)   |
-| Quality Gate           | `--exit-code 1` (Aborts deployment if images contain HIGH/CRITICAL) |
-| Artifact Archiving     | Archived via `archiveArtifacts`                          |
+| Targets Scanned        | `civicpulse/backend`, `frontend`, `nginx`, `mongodb`, `ml-decision-controller` |
+| Security Quality Gate  | `--exit-code 1` (Aborts deployment on HIGH/CRITICAL)    |
+| GHCR Push              | Authenticated push to `ghcr.io/tharunadhithyaa/civicpulse-*:${BUILD_NUMBER}` |
+| Retry Mechanism        | Multi-attempt push with exponential backoff (`push_with_retry`) |
+| Pre-Deploy Inspection  | HTTP Registry API manifest check (`docker manifest inspect`) |
 
-### Stage 11 — Deployment
+### Stage 11 — Apply Argo CD Parameter Override (Zero-Commit Design)
 | Step | Action                                    |
 |------|-------------------------------------------|
-| 1    | `docker compose down --remove-orphans`    |
-| 2    | Remove exited containers                  |
-| 3    | Prune unused networks                     |
-| 4    | `docker compose up -d --build --force-recreate` |
-| 5    | Verify all 4 containers are running       |
+| 1    | Execute `jenkins/scripts/update-gitops.sh --build-number ${BUILD_NUMBER}` |
+| 2    | Patch live parameter overrides (`backend.image.tag`, `frontend.image.tag`) directly on Argo CD Application Custom Resource in K3s |
+| 3    | Zero-Commit design avoids git commits, preventing build loops and commit churn |
+| 4    | Trigger Argo CD sync & wait for K3s workload rollout completion |
 
-> Includes automatic retry on first failure.
+### Stage 12 — Verify Self-Healing Controller & Remediations
+| Step | Action                                    |
+|------|-------------------------------------------|
+| 1    | Check ML Decision Controller readiness (`http://localhost:5000/health`) |
+| 2    | Run automated remediation verification suite (`verify-self-healing.sh`) |
 
-### Stage 12 — Health Verification
+### Stage 13 — Application Health Verification & NodePort Discovery
 | Check                  | Endpoint / Method              | Retries |
 |------------------------|--------------------------------|---------|
+| NodePort Ingress       | `http://<K3S_NODE_IP>:30080/`  | 10      |
 | Backend API            | `GET /api/health` → HTTP 200   | 10      |
-| Nginx                  | `GET /health` → HTTP 200       | 10      |
-| Frontend               | `GET /` → HTTP 200             | 10      |
-| Container health       | `docker inspect` health status | 10      |
-| Port 80                | HTTP connection test           | 10      |
-| Port 8000              | HTTP connection test           | 10      |
-| Database               | Backend health → `database.status` | 10  |
+| Nginx Proxy            | `GET /health` → HTTP 200       | 10      |
+| Container health       | `health-check.sh` probe checks | 10      |
 
-### Stage 13 — Deployment Report
-Generates and archives a comprehensive deployment report including:
+### Stage 14 — Monitoring Stack Verification
+| Check                  | Method / Endpoint              | Purpose |
+|------------------------|--------------------------------|---------|
+| Monitoring Script      | `jenkins/scripts/verify-monitoring.sh` | Audits Prometheus, Grafana, Alertmanager |
+| Grafana Dashboard UI   | `GET http://<K3S_NODE_IP>:30080/grafana/` | Validates dashboard accessibility |
+
+### Stage 15 — Publish Deployment & Security Reports
+Generates and archives comprehensive deployment reports including:
 - Build metadata (number, commit, branch, timestamp)
-- Docker image inventory (tags, sizes)
-- Container status table
-- Service URLs
-- Network and volume information
-- Disk usage summary
+- Docker image inventory & GHCR tags
+- Trivy security vulnerability reports (HTML/JSON/SARIF)
+- Service URLs & NodePort endpoints
+- Disk usage & post-build cleanup status
 
 ---
 

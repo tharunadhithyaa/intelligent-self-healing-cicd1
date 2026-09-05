@@ -191,7 +191,7 @@ See [POLL_SCM_SETUP.md](./POLL_SCM_SETUP.md) for detailed instructions.
 4. Click **Build**
 5. Monitor progress in **Console Output** or **Pipeline Stage View**
 
-### Expected Pipeline Flow (13 Stages)
+### Expected Pipeline Flow (15 Stages)
 
 ```
 Stage 1: Checkout Source Code
@@ -199,14 +199,16 @@ Stage 1: Checkout Source Code
   → Stage 3: Install Dependencies
   → Stage 4: Static Code Validation
   → Stage 5: Build Application
-  → Stage 6: SonarQube Analysis
-  → Stage 7: SonarQube Quality Gate
+  → Stage 6: Unit Tests & Code Coverage
+  → Stage 7: SonarQube Analysis & Quality Gate
   → Stage 8: Trivy Filesystem Scan
   → Stage 9: Docker Build
-  → Stage 10: Trivy Image Scan
-  → Stage 11: Deployment
-  → Stage 12: Health Verification
-  → Stage 13: Deployment Report
+  → Stage 10: Trivy Image Scan & GHCR Push
+  → Stage 11: Apply Argo CD Parameter Override (Zero-Commit)
+  → Stage 12: Verify Self-Healing Controller & Remediations
+  → Stage 13: Application Health Verification
+  → Stage 14: Monitoring Stack Verification
+  → Stage 15: Publish Deployment & Security Reports
 ```
 
 Average build duration: **5–10 minutes**.
