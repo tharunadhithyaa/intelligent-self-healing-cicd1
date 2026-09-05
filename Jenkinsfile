@@ -1600,6 +1600,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
   ✅ Deploy   : ${params.DEPLOY_ENV} environment
   🌐 App URL  : ${appUrl}
   🔧 API URL  : ${apiUrl}
+  📊 Grafana  : ${env.APP_URL}grafana/
   📦 Commit   : ${env.GIT_COMMIT_SHORT ?: 'N/A'}
   🕐 Time     : ${currentBuild.durationString}
                 """
