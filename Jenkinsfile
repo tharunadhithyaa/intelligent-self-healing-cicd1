@@ -194,7 +194,11 @@ pipeline {
                 sh '''
                     ERRORS=0
 
-                    echo "🔍 Checking required tools..."
+                    # Sanitize Docker configuration to purge invalid Windows credential helpers
+                    chmod +x jenkins/scripts/fix-docker-config.sh 2>/dev/null || true
+                    if [ -x jenkins/scripts/fix-docker-config.sh ]; then
+                        ./jenkins/scripts/fix-docker-config.sh
+                    fi
 
                     # Docker
                     if command -v docker &>/dev/null; then
@@ -813,6 +817,8 @@ ENVEOF
                     def buildFlags = params.FORCE_REBUILD ? '--no-cache --pull' : '--pull'
                     if (isUnix()) {
                         sh """
+                            chmod +x jenkins/scripts/fix-docker-config.sh 2>/dev/null || true
+                            ./jenkins/scripts/fix-docker-config.sh
                             echo "🐳 Building Docker images tagged as ${env.IMAGE_TAG} (flags: ${buildFlags}, BuildKit: enabled)..."
                             if ! DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 IMAGE_TAG="${env.IMAGE_TAG}" docker compose build --parallel ${buildFlags}; then
                                 echo "❌ [DOCKER BUILD] Docker Compose image build failed"
@@ -962,7 +968,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 set +x
                                 DOCKER_CONFIG_DIR=\$(mktemp -d "\${WORKSPACE}/.docker-ci-XXXXXX")
                                 export DOCKER_CONFIG="\${DOCKER_CONFIG_DIR}"
-                                echo '{"auths":{}}' > "\${DOCKER_CONFIG}/config.json"
+                                echo '{"auths":{},"credsStore":""}' > "\${DOCKER_CONFIG}/config.json"
                                 trap 'rm -rf "\${DOCKER_CONFIG_DIR}"' EXIT
 
                                 echo "🔐 Logging in to GitHub Container Registry (${env.GHCR_REGISTRY})..."
@@ -1177,6 +1183,72 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
         }
 
         // ══════════════════════════════════════════════════════════════════════
+        // STAGE 11 — Apply Argo CD Parameter Override (Zero-Commit Design)
+        // ══════════════════════════════════════════════════════════════════════
+        // ARCHITECTURAL RATIONALE FOR STAGE REORDERING:
+        // 1. Executed immediately after "Push Images to GHCR" stage to update Argo CD parameter overrides
+        //    as soon as images are published to GHCR.
+        // 2. ZERO-COMMIT DESIGN: Applies live parameter overrides (via kubectl patch / update-gitops.sh) directly
+        //    to the Argo CD Application resource without writing git commits, pushing to git, or modifying values.yaml.
+        // 3. Early execution guarantees that even if subsequent pre-deployment checks, health verifications,
+        //    or report stages fail, Argo CD has already been instructed to deploy the newly pushed container images.
+        // ══════════════════════════════════════════════════════════════════════
+        stage('Apply Argo CD Parameter Override') {
+            steps {
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+                echo '\033[1;36m  STAGE 11 — Apply Argo CD Parameter Override (Zero-Commit)\033[0m'
+                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
+
+                script {
+                    env.KUBERNETES_STAGE_REACHED = 'true'
+                    sh 'chmod +x jenkins/scripts/update-gitops.sh'
+                    
+                    // Validate env.BUILD_NUMBER before calling deployment script
+                    if (!env.BUILD_NUMBER || !env.BUILD_NUMBER.isNumber()) {
+                        error "[GITOPS] ERROR: Invalid or missing numeric BUILD_NUMBER: '${env.BUILD_NUMBER}'"
+                    }
+
+                    echo "[GITOPS] Authoritative Jenkins BUILD_NUMBER: ${env.BUILD_NUMBER}"
+                    echo "[GITOPS] Expected Backend image: ghcr.io/tharunadhithyaa/civicpulse-backend:${env.BUILD_NUMBER}"
+                    echo "[GITOPS] Expected Frontend image: ghcr.io/tharunadhithyaa/civicpulse-frontend:${env.BUILD_NUMBER}"
+
+                    withCredentials([
+                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN'),
+                        string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')
+                    ]) {
+                        if (isUnix()) {
+                            sh '''
+                                export BRANCH_NAME="${BRANCH_NAME:-main}"
+                                ./jenkins/scripts/update-gitops.sh --build-number ${BUILD_NUMBER}
+                            '''
+                        } else {
+                            bat '''
+                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/update-gitops.sh) { $env:BRANCH_NAME='%BRANCH_NAME%'; bash jenkins/scripts/update-gitops.sh --build-number %BUILD_NUMBER% }"
+                            '''
+                        }
+                    }
+
+                    // Optional direct Helm fallback if DEPLOY_METHOD is explicitly set to 'helm-direct'
+                    if (env.DEPLOY_METHOD == 'helm-direct') {
+                        echo "ℹ️  Executing direct Helm deployment fallback..."
+                        withCredentials([
+                            usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
+                        ]) {
+                            sh '''
+                                chmod +x jenkins/scripts/deploy.sh
+                                export DEPLOY_METHOD=helm
+                                export IMAGE_TAG="${IMAGE_TAG}"
+                                bash jenkins/scripts/deploy.sh
+                            '''
+                        }
+                    } else {
+                        echo "✅ Argo CD deployment updated. Argo CD will synchronize the K3s cluster automatically."
+                    }
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
         // STAGE 10.6 — Pre-Deployment Image Verification
         // ══════════════════════════════════════════════════════════════════════
         stage('Pre-Deployment Image Verification') {
@@ -1204,7 +1276,7 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 set +x
                                 DOCKER_CONFIG_DIR=\$(mktemp -d "\${WORKSPACE}/.docker-ci-XXXXXX")
                                 export DOCKER_CONFIG="\${DOCKER_CONFIG_DIR}"
-                                echo '{"auths":{}}' > "\${DOCKER_CONFIG}/config.json"
+                                echo '{"auths":{},"credsStore":""}' > "\${DOCKER_CONFIG}/config.json"
                                 trap 'rm -rf "\${DOCKER_CONFIG_DIR}"' EXIT
 
                                 echo "🔐 Authenticating with GHCR before inspecting image manifests..."
@@ -1336,65 +1408,6 @@ Rebuild the image using patched Alpine/OS packages (apk update && apk upgrade).
                                 powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/pre-deploy-self-heal.sh) { $env:FRESH_IMAGES_PUSHED='true'; bash jenkins/scripts/pre-deploy-self-heal.sh --mode pre --fresh-images-pushed }"
                             '''
                         }
-                    }
-                }
-            }
-        }
-
-        // ══════════════════════════════════════════════════════════════════════
-        // STAGE 11 — Trigger Argo CD Deployment (Zero-Commit Parameter Overrides)
-        // ══════════════════════════════════════════════════════════════════════
-        stage('Deploy via Argo CD') {
-            steps {
-                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
-                echo '\033[1;36m  STAGE 11 — Trigger Argo CD Deployment & Apply Parameter Overrides\033[0m'
-                echo '\033[1;36m══════════════════════════════════════════════════════════\033[0m'
-
-                script {
-                    env.KUBERNETES_STAGE_REACHED = 'true'
-                    sh 'chmod +x jenkins/scripts/update-gitops.sh'
-                    
-                    // Validate env.BUILD_NUMBER before calling deployment script
-                    if (!env.BUILD_NUMBER || !env.BUILD_NUMBER.isNumber()) {
-                        error "[GITOPS] ERROR: Invalid or missing numeric BUILD_NUMBER: '${env.BUILD_NUMBER}'"
-                    }
-
-                    echo "[GITOPS] Authoritative Jenkins BUILD_NUMBER: ${env.BUILD_NUMBER}"
-                    echo "[GITOPS] Expected Backend image: ghcr.io/tharunadhithyaa/civicpulse-backend:${env.BUILD_NUMBER}"
-                    echo "[GITOPS] Expected Frontend image: ghcr.io/tharunadhithyaa/civicpulse-frontend:${env.BUILD_NUMBER}"
-
-                    withCredentials([
-                        usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN'),
-                        string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')
-                    ]) {
-                        if (isUnix()) {
-                            sh '''
-                                export BRANCH_NAME="${BRANCH_NAME:-main}"
-                                ./jenkins/scripts/update-gitops.sh --build-number ${BUILD_NUMBER}
-                            '''
-                        } else {
-                            bat '''
-                                powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path jenkins/scripts/update-gitops.sh) { $env:BRANCH_NAME='%BRANCH_NAME%'; bash jenkins/scripts/update-gitops.sh --build-number %BUILD_NUMBER% }"
-                            '''
-                        }
-                    }
-
-
-                    // Optional direct Helm fallback if DEPLOY_METHOD is explicitly set to 'helm-direct'
-                    if (env.DEPLOY_METHOD == 'helm-direct') {
-                        echo "ℹ️  Executing direct Helm deployment fallback..."
-                        withCredentials([
-                            usernamePassword(credentialsId: 'ghcr-credentials', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')
-                        ]) {
-                            sh '''
-                                chmod +x jenkins/scripts/deploy.sh
-                                export DEPLOY_METHOD=helm
-                                export IMAGE_TAG="${IMAGE_TAG}"
-                                bash jenkins/scripts/deploy.sh
-                            '''
-                        }
-                    } else {
-                        echo "✅ Argo CD deployment updated. Argo CD will synchronize the K3s cluster automatically."
                     }
                 }
             }

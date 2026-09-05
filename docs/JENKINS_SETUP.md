@@ -247,11 +247,109 @@ The setup defines named Docker volumes so data is preserved across container res
 
 ---
 
+## Permanent Linux CI Agent Provisioning — Docker Credential Store Fix
+
+### Problem Addressed
+When Linux CI agents inherit a Docker configuration copied or mounted from a Windows environment containing `"credsStore": "desktop.exe"`, BuildKit and Docker CLI fail with:
+```
+error getting credentials - err: exec: "docker-credential-desktop.exe": executable file not found in $PATH
+```
+
+### 1. Agent Provisioning (AMI / Cloud-Init / User-Data / Ansible / Terraform)
+
+To ensure new Linux CI agents never inherit Windows credential helpers, execute `./jenkins/scripts/provision-agent-docker.sh` or include the following configuration during node provisioning:
+
+#### Shell Provisioning Script
+```bash
+# Execute repository agent provisioning script
+sudo bash jenkins/scripts/provision-agent-docker.sh
+```
+
+#### Manual / Cloud-Init User-Data (EC2 / Terraform)
+```yaml
+#cloud-config
+write_files:
+  - path: /etc/skel/.docker/config.json
+    permissions: '0600'
+    owner: root:root
+    content: |
+      {
+        "auths": {},
+        "credsStore": ""
+      }
+  - path: /home/jenkins/.docker/config.json
+    permissions: '0600'
+    owner: jenkins:jenkins
+    content: |
+      {
+        "auths": {},
+        "credsStore": ""
+      }
+runcmd:
+  - chmod 700 /home/jenkins/.docker
+  - chown -R jenkins:jenkins /home/jenkins/.docker
+```
+
+#### Ansible Playbook Task
+```yaml
+- name: Configure clean Docker credentials store for Jenkins CI user
+  ansible.builtin.copy:
+    dest: "/home/jenkins/.docker/config.json"
+    owner: jenkins
+    group: jenkins
+    mode: '0600'
+    content: |
+      {
+        "auths": {},
+        "credsStore": ""
+      }
+```
+
+### 2. Pre-Build Sanitization Script (`jenkins/scripts/fix-docker-config.sh`)
+
+The pipeline automatically invokes `jenkins/scripts/fix-docker-config.sh` before Docker builds. It sanitizes `~/.docker/config.json` and `$DOCKER_CONFIG/config.json` by purging any `desktop.exe` entry:
+
+```bash
+# Run manually on any Linux build node if needed:
+./jenkins/scripts/fix-docker-config.sh
+```
+
+### 3. Linux-Compatible Authentication for Private Registries (GHCR)
+
+Always use standard token-based authentication via `docker login` with `--password-stdin`. This writes directly to the `"auths"` object inside `config.json` without requiring external credential helpers:
+
+```bash
+echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+```
+
+---
+
 ## Troubleshooting
 
 ### Common Issues
 
-#### 1. Docker Permission Denied
+#### 1. Docker Credential Desktop Helper Error
+```
+error getting credentials - err: exec: "docker-credential-desktop.exe": executable file not found in $PATH
+```
+**Solution:**
+Run the pre-build sanitizer script to purge `desktop.exe` from `~/.docker/config.json`:
+```bash
+./jenkins/scripts/fix-docker-config.sh
+```
+Or overwrite `~/.docker/config.json` directly:
+```bash
+mkdir -p ~/.docker
+cat <<'EOF' > ~/.docker/config.json
+{
+  "auths": {},
+  "credsStore": ""
+}
+EOF
+chmod 600 ~/.docker/config.json
+```
+
+#### 2. Docker Permission Denied
 ```
 Got permission denied while trying to connect to the Docker daemon socket
 ```
@@ -262,7 +360,7 @@ sudo usermod -aG docker jenkins
 sudo systemctl restart jenkins
 ```
 
-#### 2. Node.js Not Found
+#### 3. Node.js Not Found
 ```
 node: command not found
 ```
@@ -274,7 +372,7 @@ nvm install 22
 nvm use 22
 ```
 
-#### 3. Docker Compose Not Found
+#### 4. Docker Compose Not Found
 ```
 docker compose: command not found
 ```
@@ -289,7 +387,7 @@ sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-
 sudo chmod +x /usr/local/bin/docker-compose
 ```
 
-#### 4. Port Already in Use
+#### 5. Port Already in Use
 ```
 Bind for 0.0.0.0:80: address already in use
 ```
@@ -302,7 +400,7 @@ sudo kill -9 <PID>
 docker compose down
 ```
 
-#### 5. Health Check Timeout
+#### 6. Health Check Timeout
 ```
 Health checks FAILED after 10 attempts
 ```
@@ -312,7 +410,7 @@ Health checks FAILED after 10 attempts
 - Review container logs: `docker logs civicpulse-backend`
 - Ensure `.env` files exist and are correct
 
-#### 6. Build Out of Memory
+#### 7. Build Out of Memory
 ```
 JavaScript heap out of memory
 ```
@@ -322,7 +420,7 @@ JavaScript heap out of memory
 export NODE_OPTIONS="--max-old-space-size=4096"
 ```
 
-#### 7. Git Checkout Fails
+#### 8. Git Checkout Fails
 ```
 Permission denied (publickey)
 ```
@@ -343,3 +441,4 @@ ssh-keygen -t ed25519 -C "jenkins@server"
 4. **Enable audit logging** — track who runs builds
 5. **Use HTTPS** — place Jenkins behind a reverse proxy with SSL
 6. **Regular updates** — keep Jenkins and plugins updated
+
